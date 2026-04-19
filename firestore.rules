@@ -1,0 +1,106 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+    
+    function isSignedIn() {
+      // Allow anonymous or non-verified emails for MVP since Google Auth sets email_verified = true usually, but sometimes not right away.
+      return request.auth != null;
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+    
+    function incoming() {
+      return request.resource.data;
+    }
+    
+    function existing() {
+      return resource.data;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['targetScore', 'timeSaved', 'createdAt', 'updatedAt']) 
+        && data.targetScore is number 
+        && data.timeSaved is number 
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+    
+    function isValidUserUpdate(data) {
+      return data.keys().hasAll(['targetScore', 'timeSaved', 'createdAt', 'updatedAt']) 
+        && data.targetScore is number 
+        && data.timeSaved is number 
+        && data.updatedAt == request.time;
+    }
+
+    function isValidErrorRecord(data) {
+      return data.keys().hasAll(['painPoint', 'rule', 'questionText', 'options', 'status', 'createdAt', 'updatedAt'])
+        && data.keys().size() == 7
+        && data.painPoint is string
+        && data.painPoint.size() <= 1000
+        && data.rule is string
+        && data.rule.size() <= 1000
+        && data.questionText is string
+        && data.questionText.size() <= 3000
+        && data.options is list
+        && data.options.size() <= 4
+        && (data.options.size() == 0 || data.options[0] is string)
+        && data.status in ['active', 'resolved']
+        && data.createdAt == request.time
+        && data.updatedAt == request.time;
+    }
+
+    function isValidErrorUpdate(data) {
+      return data.keys().hasAll(['status', 'updatedAt'])
+        && data.status in ['active', 'resolved']
+        && data.updatedAt == request.time;
+    }
+
+    match /users/{userId} {
+      allow get: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+      allow list: if false;
+      allow create: if isSignedIn() 
+        && request.auth.uid == userId 
+        && isValidId(userId)
+        && isValidUser(incoming());
+      
+      allow update: if isSignedIn() 
+        && request.auth.uid == userId 
+        && isValidId(userId)
+        && isValidUserUpdate(incoming())
+        && incoming().createdAt == existing().createdAt
+        && (
+          incoming().diff(existing()).affectedKeys().hasOnly(['targetScore', 'timeSaved', 'grade', 'textbooks', 'updatedAt', 'cognitiveState'])
+        );
+      allow delete: if false;
+
+      match /errors/{errorId} {
+        allow get: if isSignedIn() && request.auth.uid == userId && isValidId(userId) && isValidId(errorId);
+        allow list: if isSignedIn() && request.auth.uid == userId && isValidId(userId);
+        allow create: if isSignedIn() 
+          && request.auth.uid == userId 
+          && isValidId(userId)
+          && isValidId(errorId)
+          && isValidErrorRecord(incoming())
+          && exists(/databases/$(database)/documents/users/$(userId));
+        
+        allow update: if isSignedIn() 
+          && request.auth.uid == userId 
+          && isValidId(userId)
+          && isValidId(errorId)
+          && isValidErrorUpdate(incoming())
+          && incoming().createdAt == existing().createdAt
+          && incoming().painPoint == existing().painPoint
+          && incoming().rule == existing().rule
+          && incoming().questionText == existing().questionText
+          && incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt']);
+          
+        allow delete: if false;
+      }
+    }
+  }
+}

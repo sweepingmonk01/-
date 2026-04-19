@@ -1,0 +1,63 @@
+{
+  "entities": {
+    "User": {
+      "title": "User",
+      "description": "User profile and statistics",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "User ID, matches auth uid" },
+        "grade": { "type": "string", "description": "User's grade level" },
+        "textbooks": {
+          "type": "object",
+          "properties": {
+            "zh": { "type": "string" },
+            "ma": { "type": "string" },
+            "en": { "type": "string" }
+          }
+        },
+        "targetScore": { "type": "number", "description": "Target score set by user" },
+        "timeSaved": { "type": "number", "description": "Total time saved in minutes" },
+        "cognitiveState": {
+          "type": "object",
+          "properties": {
+             "focus": { "type": "number" },
+             "frustration": { "type": "number" },
+             "joy": { "type": "number" }
+          }
+        },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["id", "targetScore", "timeSaved", "createdAt", "updatedAt"]
+    },
+    "ErrorRecord": {
+      "title": "Error Record",
+      "description": "A mistake made by the user, saved for spaced repetition",
+      "type": "object",
+      "properties": {
+        "painPoint": { "type": "string", "description": "What core concept failed" },
+        "rule": { "type": "string", "description": "The one-sentence rule" },
+        "questionText": { "type": "string", "description": "Original question text" },
+        "options": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "The options array"
+        },
+        "status": { "type": "string", "enum": ["active", "resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "updatedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["painPoint", "rule", "questionText", "options", "status", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "users/{userId}": {
+      "schema": { "$ref": "#/entities/User" },
+      "description": "Stores user profiles and stats."
+    },
+    "users/{userId}/errors/{errorId}": {
+      "schema": { "$ref": "#/entities/ErrorRecord" },
+      "description": "Stores learning errors specific to a user."
+    }
+  }
+}
