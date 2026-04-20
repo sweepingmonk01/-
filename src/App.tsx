@@ -1,43 +1,186 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import { GoogleGenAI, Type } from "@google/genai";
 import { 
   Sword, Map as MapIcon, ShieldAlert, Zap, Clock, 
   Check, ChevronRight, Play, BookOpen, Star, 
   BrainCircuit, RefreshCw, Trophy, Beaker,
-  Target, Cpu, Sliders, Lock, Flame, Camera, UploadCloud, Orbit, AlertTriangle
+  Target, Cpu, Sliders, Lock, Flame, Camera, UploadCloud, Orbit, AlertTriangle, Volume2, VolumeX
 } from 'lucide-react';
 import { auth, loginWithGoogle, logoutUser, syncUserProfile, getUserProfile, saveErrorRecord, getActiveErrors, resolveError, updateCognitiveState } from './lib/firebase';
+import {
+  analyzeQuestionImage,
+  createMobiusSession,
+  dehydrateHomework as dehydrateHomeworkViaApi,
+  generateCloneQuestion as generateCloneQuestionViaApi,
+  generateTheaterScript as generateTheaterScriptViaApi,
+  getMobiusStudentStateSummary,
+  refreshMobiusMediaJob,
+  resolveMobiusContent,
+  resolveMobiusInteraction,
+} from './lib/mobius';
 import { onAuthStateChanged } from 'firebase/auth';
 
 type ScreenState = 'welcome' | 'profile-setup' | 'diagnostic-loading' | 'target-setter' | 'dashboard' | 'subject-map' | 'error-book' | 'overview' | 'combat' | 'combat-feedback' | 'report' | 'dehydrator' | 'theater';
 
-interface AIQuestionData {
-  painPoint: string;
-  rule: string;
-  questionText: string;
-  options: string[];
-  correctAnswer: string;
+type AIQuestionData = import('./lib/mobius').AIQuestionData;
+type DehydrateResult = import('./lib/mobius').DehydrateResult;
+type TheaterScript = import('./lib/mobius').TheaterScript;
+type KnowledgeActionType = import('./lib/mobius').KnowledgeActionType;
+type InteractionConfidence = import('./lib/mobius').InteractionConfidence;
+type MobiusStudentStateSummaryResponse = import('./lib/mobius').MobiusStudentStateSummaryResponse;
+
+const SELECT_ACTION_OPTIONS = [
+  { id: 'rule-first', label: '先触发规则动作', result: 'aligned' as const },
+  { id: 'partial-rule', label: '想到一点规则，但步骤不稳', result: 'partial' as const },
+  { id: 'guess-first', label: '先猜答案再补理由', result: 'guess' as const },
+];
+
+const SEQUENCE_ACTION_STEPS = ['识别关键条件', '触发核心规则', '确认最终答案'];
+const DRAW_ACTION_CHECKPOINTS = ['锁定关键点', '连接正确路径', '复核动作结果'];
+
+interface TheaterMeta {
+  source: 'mobius' | 'gemini';
+  provider?: string;
+  videoStatus?: 'queued' | 'processing' | 'ready' | 'failed';
+  videoUrl?: string;
+  activeVideoUrl?: string;
+  mediaJobId?: string;
+  providerJobId?: string;
+  errorMessage?: string;
+  coachMessage?: string;
+  nextActions?: string[];
+  resolutionTitle?: string;
+  branchOutcome?: 'success' | 'failure';
+  contentKnowledgePointTitle?: string;
+  contentKnowledgePointGrade?: string;
+  contentEvidence?: string[];
+  relatedQuestionSummary?: string[];
+  diagnosedMistakeLabels?: string[];
+  knowledgeActionLabel?: string;
+  knowledgeActionType?: import('./lib/mobius').KnowledgeActionType;
+  knowledgeActionId?: string;
+  adjudicationRationale?: string[];
 }
 
-interface DehydrateResult {
-  total: number;
-  trashEasy: number;
-  dropHard: number;
-  mustDo: number;
-  reasoning: string;
-  mustDoIndices: string;
+type SubjectKey = 'zh' | 'ma' | 'en';
+type ErrorFilter = 'all' | SubjectKey;
+
+interface TaskCardData {
+  id: string;
+  subject: SubjectKey;
+  title: string;
+  detail: string;
+  mins: number;
+  xp: number;
+  status: 'urgent' | 'todo' | 'done';
+  action: 'upload' | 'error' | 'dehydrate' | 'map';
+  focusSubject?: SubjectKey;
+  focusNode?: string;
 }
 
-interface TheaterScript {
-  sceneIntro: string;
-  emotion: string;
-  interactionPrompt: string;
-  successScene: string;
-  failureScene: string;
+interface KnowledgeNode {
+  name: string;
+  state: 'mastered' | 'learning' | 'locked';
+  progress: number;
 }
+
+interface TaskStatusRecord {
+  completed: boolean;
+  completedAt?: string;
+}
+
+interface KnowledgeProgressState {
+  zh: { textbook: string; nodes: { name: string; progress: number }[] };
+  ma: { textbook: string; nodes: { name: string; progress: number }[] };
+  en: { textbook: string; nodes: { name: string; progress: number }[] };
+}
+
+const SUBJECT_META: Record<SubjectKey, { name: string; short: string; color: string; light: string; icon: string; textbookLabel: string; }> = {
+  zh: { name: '丹青语文', short: '语文', color: 'var(--color-subj-zh)', light: 'rgba(255,93,115,0.12)', icon: '文', textbookLabel: '语文版图' },
+  ma: { name: '极光数学', short: '数学', color: 'var(--color-subj-ma)', light: 'rgba(0,180,216,0.12)', icon: '数', textbookLabel: '数学版图' },
+  en: { name: '阳光英语', short: '英语', color: 'var(--color-subj-en)', light: 'rgba(255,190,11,0.14)', icon: '英', textbookLabel: '英语版图' },
+};
+
+const KNOWLEDGE_LIBRARY: Record<SubjectKey, string[]> = {
+  zh: ['多音字辨析', '形近字辨别', '标点用法', '阅读主旨题', '作文三段式', '古诗默写'],
+  ma: ['几何辅助线', '面积与面积单位', '单位换算', '周长公式', '乘法估算', '应用题审题'],
+  en: ['There is/are', '情态动词 can', '天气句型', '名词复数变化', '位置词 upstairs', '完形逻辑词'],
+};
+
+const DEMO_ERRORS = [
+  {
+    id: 'demo-ma-1',
+    painPoint: '几何中点辅助线选择失误',
+    rule: '遇中点，先想倍长中线；造全等比硬算更稳。',
+    questionText: '在 △ABC 中，D 为 AB 中点，要求 CD 的范围时，第一步最稳妥的辅助线是什么？',
+    options: ['过 D 作 DE // BC', '延长 CD 至 E，使 DE = CD，连接 AE, BE', '过 C 作 CF ⊥ AB', '作 BC 的垂直平分线'],
+    status: 'active',
+  },
+  {
+    id: 'demo-en-1',
+    painPoint: 'There is/are 结构混淆',
+    rule: 'there be 看最近主语，单数 is，复数 are。',
+    questionText: 'There ___ a sofa and two chairs in the living room.',
+    options: ['is', 'are', 'am', 'be'],
+    status: 'active',
+  },
+  {
+    id: 'demo-zh-1',
+    painPoint: '多音字辨析不稳定',
+    rule: '银行读 hang，成长读 zhang；先看词义再读音。',
+    questionText: '“行”在“银行”中读什么？',
+    options: ['xing', 'hang', 'heng', 'hang4'],
+    status: 'active',
+  },
+];
+
+const inferSubjectFromText = (text: string): SubjectKey => {
+  const content = text.toLowerCase();
+  if (/英语|english|weather|season|there is|there are|can't|upstairs|spring|winter|library/.test(content)) {
+    return 'en';
+  }
+  if (/数学|面积|周长|几何|中点|辅助线|平方|方程|dm|cm|m²|应用题/.test(content)) {
+    return 'ma';
+  }
+  return 'zh';
+};
+
+const inferKnowledgeNode = (text: string, subject: SubjectKey): string => {
+  const normalized = text.toLowerCase();
+  const pool = KNOWLEDGE_LIBRARY[subject];
+  const directMatch = pool.find((item) => normalized.includes(item.toLowerCase()));
+  if (directMatch) return directMatch;
+
+  if (subject === 'ma' && /中点|辅助线|平行四边形/.test(text)) return '几何辅助线';
+  if (subject === 'ma' && /面积|平方|单位换算/.test(text)) return '面积与面积单位';
+  if (subject === 'en' && /there is|there are/.test(normalized)) return 'There is/are';
+  if (subject === 'en' && /can|can't/.test(normalized)) return '情态动词 can';
+  if (subject === 'zh' && /多音字/.test(text)) return '多音字辨析';
+  if (subject === 'zh' && /标点/.test(text)) return '标点用法';
+
+  return pool[0];
+};
+
+const getErrorMeta = (errorItem: any) => {
+  const rawText = `${errorItem?.painPoint || ''} ${errorItem?.rule || ''} ${errorItem?.questionText || ''}`;
+  const subject = inferSubjectFromText(rawText);
+  return {
+    subject,
+    node: inferKnowledgeNode(rawText, subject),
+  };
+};
+
+const getErrorRecencyLabel = (index: number) => {
+  if (index === 0) return '刚刚录入';
+  if (index < 3) return '24h 内高危';
+  if (index < 6) return '72h 巩固';
+  return '待回访';
+};
+
+const getTodayKey = () => new Date().toISOString().slice(0, 10);
 
 export default function App() {
+  const todayKey = getTodayKey();
   const [currentScreen, setCurrentScreen] = useState<ScreenState>('welcome');
   const [timeSaved, setTimeSaved] = useState(0);
   const [targetScore, setTargetScore] = useState(115);
@@ -49,6 +192,10 @@ export default function App() {
   // Profile settings state
   const [grade, setGrade] = useState('');
   const [textbooks, setTextbooks] = useState({ zh: '部编版(人教)', ma: '人教版', en: '人教PEP' });
+  const [theaterCueEnabled, setTheaterCueEnabled] = useState(() => {
+    if (typeof window === 'undefined') return true;
+    return window.localStorage.getItem('liezi-theater-cue-enabled') !== 'false';
+  });
 
   // Monitor auth state and load profile
   useEffect(() => {
@@ -62,7 +209,32 @@ export default function App() {
           if (profile.targetScore) setTargetScore(profile.targetScore);
           if (profile.timeSaved !== undefined) setTimeSaved(profile.timeSaved);
           if (profile.cognitiveState) setCogState(profile.cognitiveState);
+          if (profile.theaterCueEnabled !== undefined) setTheaterCueEnabled(Boolean(profile.theaterCueEnabled));
+          if (profile.taskStatusDate === todayKey) {
+            setTaskStatus(profile.todayTaskStatus || {});
+            setTaskStatusDate(profile.taskStatusDate || todayKey);
+          } else {
+            setTaskStatus({});
+            setTaskStatusDate(todayKey);
+          }
+          if (profile.knowledgeProgress) {
+            setKnowledgeProgressState(profile.knowledgeProgress);
+          }
         }
+        try {
+          const errs = await getActiveErrors(u.uid);
+          setErrorList(errs);
+        } catch (error) {
+          console.error(error);
+        }
+        await refreshStudentStateSummary(u.uid);
+      } else {
+        setTaskStatus({});
+        setTaskStatusDate('');
+        setKnowledgeProgressState(null);
+        setPracticeQueue([]);
+        setPracticeIndex(0);
+        setStudentStateSummary(null);
       }
       setAuthChecking(false);
     });
@@ -91,15 +263,95 @@ export default function App() {
   const [dehydrateData, setDehydrateData] = useState<DehydrateResult | null>(null);
   const [theaterScript, setTheaterScript] = useState<TheaterScript | null>(null);
   const [theaterResolution, setTheaterResolution] = useState<'success' | 'failure' | null>(null);
+  const [theaterMeta, setTheaterMeta] = useState<TheaterMeta | null>(null);
+  const [theaterDecisionPending, setTheaterDecisionPending] = useState(false);
+  const [theaterActionCompleted, setTheaterActionCompleted] = useState(true);
+  const [theaterSelfCheck, setTheaterSelfCheck] = useState<'aligned' | 'partial' | 'guess'>('aligned');
+  const [theaterConfidence, setTheaterConfidence] = useState<InteractionConfidence>('medium');
+  const [theaterSelectedOption, setTheaterSelectedOption] = useState<string>('rule-first');
+  const [theaterSequence, setTheaterSequence] = useState<string[]>(SEQUENCE_ACTION_STEPS);
+  const [theaterDrawCheckpoints, setTheaterDrawCheckpoints] = useState<string[]>([]);
+  const [theaterCutFxActive, setTheaterCutFxActive] = useState(false);
+  const [theaterReadyCueActive, setTheaterReadyCueActive] = useState(false);
   
   // Cognitive Engine State
   const [cogState, setCogState] = useState({ focus: 50, frustration: 0, joy: 50 });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dehydrateInputRef = useRef<HTMLInputElement>(null);
+  const previousActiveVideoUrlRef = useRef<string | undefined>(undefined);
+  const theaterAudioContextRef = useRef<AudioContext | null>(null);
 
   // Error Book State
   const [errorList, setErrorList] = useState<any[]>([]);
+  const [errorFilter, setErrorFilter] = useState<ErrorFilter>('all');
+  const [mapSubject, setMapSubject] = useState<SubjectKey>('ma');
+  const [taskStatus, setTaskStatus] = useState<Record<string, TaskStatusRecord>>({});
+  const [taskStatusDate, setTaskStatusDate] = useState('');
+  const [knowledgeProgressState, setKnowledgeProgressState] = useState<KnowledgeProgressState | null>(null);
+  const [practiceQueue, setPracticeQueue] = useState<any[]>([]);
+  const [practiceIndex, setPracticeIndex] = useState(0);
+  const [demoMode, setDemoMode] = useState(false);
+  const [studentStateSummary, setStudentStateSummary] = useState<MobiusStudentStateSummaryResponse | null>(null);
+
+  const refreshStudentStateSummary = async (studentId: string) => {
+    try {
+      const summary = await getMobiusStudentStateSummary(studentId);
+      setStudentStateSummary(summary);
+    } catch (error) {
+      setStudentStateSummary(null);
+      if ((error as Error).message.includes('404')) return;
+      console.warn('Mobius state summary refresh failed.', error);
+    }
+  };
+
+  useEffect(() => {
+    if (!user && demoMode) {
+      void refreshStudentStateSummary('demo-student');
+    }
+  }, [user, demoMode]);
+
+  useEffect(() => {
+    if (
+      currentScreen !== 'theater' ||
+      theaterMeta?.source !== 'mobius' ||
+      !theaterMeta.mediaJobId ||
+      !theaterMeta.videoStatus ||
+      !['queued', 'processing'].includes(theaterMeta.videoStatus)
+    ) {
+      return;
+    }
+
+    let cancelled = false;
+    const intervalId = window.setInterval(async () => {
+      try {
+        const job = await refreshMobiusMediaJob(theaterMeta.mediaJobId!);
+        if (cancelled) return;
+
+        setTheaterMeta((current) => {
+          if (!current || current.mediaJobId !== job.id) return current;
+          return {
+            ...current,
+            provider: job.provider,
+            providerJobId: job.providerJobId,
+            videoStatus: job.status,
+            videoUrl: job.playbackUrl,
+            activeVideoUrl: job.status === 'ready' && job.playbackUrl ? job.playbackUrl : current.activeVideoUrl,
+            errorMessage: job.errorMessage,
+          };
+        });
+      } catch (error) {
+        if (!cancelled) {
+          console.warn('Mobius media job refresh failed.', error);
+        }
+      }
+    }, 2500);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(intervalId);
+    };
+  }, [currentScreen, theaterMeta]);
 
   useEffect(() => {
     if (currentScreen === 'error-book' && user) {
@@ -107,7 +359,97 @@ export default function App() {
     }
   }, [currentScreen, user]);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    window.localStorage.setItem('liezi-theater-cue-enabled', String(theaterCueEnabled));
+  }, [theaterCueEnabled]);
+
+  const toggleTheaterCueEnabled = async () => {
+    const nextValue = !theaterCueEnabled;
+    setTheaterCueEnabled(nextValue);
+    if (user) {
+      await syncUserProfile(user.uid, { theaterCueEnabled: nextValue });
+    }
+  };
+
+  useEffect(() => {
+    const activeVideoUrl = theaterMeta?.activeVideoUrl;
+    const previousVideoUrl = previousActiveVideoUrlRef.current;
+
+    if (!activeVideoUrl) {
+      previousActiveVideoUrlRef.current = undefined;
+      return;
+    }
+
+    if (previousVideoUrl && previousVideoUrl !== activeVideoUrl) {
+      setTheaterCutFxActive(true);
+      if (theaterCueEnabled) {
+        setTheaterReadyCueActive(true);
+        playTheaterReadyCue();
+      }
+      const timeoutId = window.setTimeout(() => {
+        setTheaterCutFxActive(false);
+      }, 280);
+      const cueTimeoutId = window.setTimeout(() => {
+        setTheaterReadyCueActive(false);
+      }, 720);
+      previousActiveVideoUrlRef.current = activeVideoUrl;
+      return () => {
+        window.clearTimeout(timeoutId);
+        window.clearTimeout(cueTimeoutId);
+      };
+    }
+
+    previousActiveVideoUrlRef.current = activeVideoUrl;
+    return;
+  }, [theaterCueEnabled, theaterMeta?.activeVideoUrl]);
+
+  const playTheaterReadyCue = () => {
+    if (typeof window === 'undefined') return;
+
+    const AudioContextCtor = window.AudioContext || (window as typeof window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!AudioContextCtor) return;
+
+    try {
+      const context = theaterAudioContextRef.current ?? new AudioContextCtor();
+      theaterAudioContextRef.current = context;
+
+      if (context.state === 'suspended') {
+        void context.resume();
+      }
+
+      const startAt = context.currentTime + 0.01;
+      const masterGain = context.createGain();
+      masterGain.gain.setValueAtTime(0.0001, startAt);
+      masterGain.gain.exponentialRampToValueAtTime(0.06, startAt + 0.02);
+      masterGain.gain.exponentialRampToValueAtTime(0.0001, startAt + 0.22);
+      masterGain.connect(context.destination);
+
+      const toneA = context.createOscillator();
+      toneA.type = 'triangle';
+      toneA.frequency.setValueAtTime(880, startAt);
+      toneA.frequency.exponentialRampToValueAtTime(1320, startAt + 0.12);
+      toneA.connect(masterGain);
+      toneA.start(startAt);
+      toneA.stop(startAt + 0.14);
+
+      const toneB = context.createOscillator();
+      toneB.type = 'sine';
+      toneB.frequency.setValueAtTime(1760, startAt + 0.06);
+      toneB.frequency.exponentialRampToValueAtTime(1480, startAt + 0.2);
+      toneB.connect(masterGain);
+      toneB.start(startAt + 0.06);
+      toneB.stop(startAt + 0.22);
+    } catch (error) {
+      console.warn('Theater ready cue playback failed.', error);
+    }
+  };
+
   const loadErrors = async () => {
+    if (demoMode) {
+      setErrorList(DEMO_ERRORS);
+      return;
+    }
     if (!user) return;
     try {
       const errs = await getActiveErrors(user.uid);
@@ -116,6 +458,357 @@ export default function App() {
       console.error(e);
     }
   };
+
+  const enterDemoMode = () => {
+    setDemoMode(true);
+    setGrade((prev) => prev || '四年级');
+    setTargetScore(115);
+    setTimeSaved(26);
+    setTextbooks({ zh: '部编版(人教)', ma: '人教版', en: '人教PEP' });
+    setErrorList(DEMO_ERRORS);
+    setTaskStatus({});
+    setTaskStatusDate(todayKey);
+    setCurrentScreen('dashboard');
+  };
+
+  const persistTaskStatus = async (nextStatus: Record<string, TaskStatusRecord>) => {
+    setTaskStatus(nextStatus);
+    setTaskStatusDate(todayKey);
+    if (user) {
+      await syncUserProfile(user.uid, {
+        todayTaskStatus: nextStatus,
+        taskStatusDate: todayKey,
+      });
+    }
+  };
+
+  const markTaskComplete = async (taskId: string) => {
+    const nextStatus = {
+      ...taskStatus,
+      [taskId]: {
+        completed: true,
+        completedAt: new Date().toISOString(),
+      },
+    };
+    await persistTaskStatus(nextStatus);
+  };
+
+  const startContinuousPractice = async (errors: any[], startIndex: number) => {
+    const queue = errors.slice(startIndex, startIndex + 5);
+    if (!queue.length) return;
+    setPracticeQueue(queue);
+    setPracticeIndex(0);
+    await generateCloneQuestion(queue[0]);
+  };
+
+  useEffect(() => {
+    if (taskStatusDate && taskStatusDate !== todayKey) {
+      persistTaskStatus({});
+    }
+  }, [taskStatusDate, todayKey]);
+
+  useEffect(() => {
+    const nextKnowledgeProgress: KnowledgeProgressState = {
+      zh: {
+        textbook: textbooks.zh,
+        nodes: KNOWLEDGE_LIBRARY.zh.map((name, index) => {
+          const hitCount = errorList.filter((item) => {
+            const meta = getErrorMeta(item);
+            return meta.subject === 'zh' && meta.node === name;
+          }).length;
+          const progress = Math.max(24, Math.min(96, (index < 2 ? 86 : 62) - hitCount * 18));
+          return { name, progress };
+        }),
+      },
+      ma: {
+        textbook: textbooks.ma,
+        nodes: KNOWLEDGE_LIBRARY.ma.map((name, index) => {
+          const hitCount = errorList.filter((item) => {
+            const meta = getErrorMeta(item);
+            return meta.subject === 'ma' && meta.node === name;
+          }).length;
+          const progress = Math.max(24, Math.min(96, (index < 2 ? 84 : 60) - hitCount * 18));
+          return { name, progress };
+        }),
+      },
+      en: {
+        textbook: textbooks.en,
+        nodes: KNOWLEDGE_LIBRARY.en.map((name, index) => {
+          const hitCount = errorList.filter((item) => {
+            const meta = getErrorMeta(item);
+            return meta.subject === 'en' && meta.node === name;
+          }).length;
+          const progress = Math.max(24, Math.min(96, (index < 2 ? 88 : 64) - hitCount * 18));
+          return { name, progress };
+        }),
+      },
+    };
+
+    const currentSerialized = JSON.stringify(knowledgeProgressState);
+    const nextSerialized = JSON.stringify(nextKnowledgeProgress);
+    if (currentSerialized !== nextSerialized) {
+      setKnowledgeProgressState(nextKnowledgeProgress);
+      if (user) {
+        syncUserProfile(user.uid, { knowledgeProgress: nextKnowledgeProgress }).catch((error) => {
+          console.error(error);
+        });
+      }
+    }
+  }, [errorList, textbooks, user, knowledgeProgressState]);
+
+  const filteredErrors = errorFilter === 'all'
+    ? errorList
+    : errorList.filter((errorItem) => getErrorMeta(errorItem).subject === errorFilter);
+
+  const topMistakeCategory = (() => {
+    const entries = Object.entries(studentStateSummary?.mistakeCategoryCounts ?? {});
+    if (!entries.length) return null;
+    const [category, count] = entries.sort((left, right) => Number(right[1] ?? 0) - Number(left[1] ?? 0))[0];
+    const labels: Record<string, string> = {
+      'concept-confusion': '概念混淆',
+      'rule-recall': '规则提取',
+      'strategy-selection': '策略选择',
+      'careless-execution': '执行粗心',
+      'language-mapping': '语言映射',
+    };
+    return {
+      label: labels[category] ?? category,
+      count: count ?? 0,
+    };
+  })();
+
+  const studentModelCards = [
+    {
+      label: '累计快照',
+      value: String(studentStateSummary?.totalSnapshots ?? 0),
+      tone: 'text-[var(--color-primary)]',
+    },
+    {
+      label: '最近裁决',
+      value:
+        studentStateSummary?.interactionStats.lastOutcome === 'success'
+          ? '命中规则'
+          : studentStateSummary?.interactionStats.lastOutcome === 'failure'
+            ? '需要保护'
+            : '暂无',
+      tone:
+        studentStateSummary?.interactionStats.lastOutcome === 'success'
+          ? 'text-[var(--color-accent-green)]'
+          : 'text-[var(--color-accent-pink)]',
+    },
+    {
+      label: '主风险型',
+      value: topMistakeCategory?.label ?? '待积累',
+      tone: 'text-[var(--color-secondary)]',
+    },
+  ];
+
+  const errorStats = errorList.reduce(
+    (acc, errorItem) => {
+      const { subject } = getErrorMeta(errorItem);
+      acc.total += 1;
+      acc[subject] += 1;
+      return acc;
+    },
+    { total: 0, zh: 0, ma: 0, en: 0 }
+  );
+
+  const stateDrivenError = (() => {
+    const recentPainPoints = studentStateSummary?.recentPainPoints ?? [];
+    for (const painPoint of recentPainPoints) {
+      const matched = errorList.find((errorItem) => {
+        const candidates = [errorItem.painPoint, errorItem.rule, errorItem.questionText]
+          .filter(Boolean)
+          .map((item: string) => item.toLowerCase());
+        const normalizedPainPoint = painPoint.toLowerCase();
+        return candidates.some((item) => item.includes(normalizedPainPoint) || normalizedPainPoint.includes(item));
+      });
+      if (matched) return matched;
+    }
+    return errorList[0];
+  })();
+
+  const preferredFocus = stateDrivenError
+    ? getErrorMeta(stateDrivenError)
+    : {
+        subject: (studentStateSummary?.recommendedSessionDefaults?.knowledgeActionType === 'sequence' ? 'en' : 'ma') as SubjectKey,
+        node: '',
+      };
+  const recommendedErrorId = stateDrivenError?.id;
+
+  const todayPlan: TaskCardData[] = (() => {
+    const plan: TaskCardData[] = [];
+    const expectedMinutes = Math.max(15, Math.ceil((targetScore - 85) * 1.5));
+    const topError = stateDrivenError;
+    const lastOutcome = studentStateSummary?.interactionStats.lastOutcome;
+    const shouldProtect = lastOutcome === 'failure';
+
+    if (topError) {
+      const { subject, node } = getErrorMeta(topError);
+      plan.push({
+        id: 'error-revive',
+        subject,
+        title: shouldProtect ? `保护性重构：${node}` : `优先修复：${node}`,
+        detail: shouldProtect
+          ? `最近一次裁决还没命中规则，先围绕“${topError.rule || topError.painPoint || '当前高频错点'}”收窄提示。`
+          : `先把“${topError.rule || topError.painPoint || '高频错点'}”修掉，立刻减少重复失分。`,
+        mins: shouldProtect ? 10 : 8,
+        xp: shouldProtect ? 20 : 18,
+        status: taskStatus['error-revive']?.completed ? 'done' : 'urgent',
+        action: 'error',
+        focusSubject: subject,
+        focusNode: node,
+      });
+    } else {
+      plan.push({
+        id: 'upload-question',
+        subject: 'ma',
+        title: '上传 1 道真实不会题',
+        detail: '把今天最卡的一题交给列子御风拆解，拿到一句话法则。',
+        mins: 6,
+        xp: 12,
+        status: taskStatus['upload-question']?.completed ? 'done' : 'todo',
+        action: 'upload',
+      });
+    }
+
+    plan.push({
+      id: 'knowledge-map',
+      subject: preferredFocus.subject,
+      title: shouldProtect ? '巡视保护性节点' : '巡视知识地图',
+      detail: preferredFocus.node
+        ? `直接聚焦 ${SUBJECT_META[preferredFocus.subject].short} 的“${preferredFocus.node}”，别再平均用力。`
+        : '只看正在失血的节点，决定今晚优先打哪一块。',
+      mins: 4,
+      xp: 8,
+      status: taskStatus['knowledge-map']?.completed ? 'done' : errorList.length > 2 ? 'urgent' : 'todo',
+      action: 'map',
+      focusSubject: preferredFocus.subject,
+      focusNode: preferredFocus.node || undefined,
+    });
+
+    plan.push({
+      id: 'dehydrate-homework',
+      subject: 'en',
+      title: '整页作业脱水',
+      detail: `以 ${targetScore} 分目标重排作业优先级，回收低效题海时间。`,
+      mins: 5,
+      xp: 16,
+      status: taskStatus['dehydrate-homework']?.completed || timeSaved > 0 ? 'done' : 'todo',
+      action: 'dehydrate',
+    });
+
+    if (expectedMinutes > 26) {
+      plan.push({
+        id: 'stability-round',
+        subject: preferredFocus.subject,
+        title: shouldProtect ? '补 1 轮规则复位' : '补 1 轮短时巩固',
+        detail: shouldProtect
+          ? '先把最近失手的规则重新走顺，再进入额外扩张。'
+          : '目标分拉得更高，今晚需要一轮额外的保分复现。',
+        mins: 6,
+        xp: 10,
+        status: taskStatus['stability-round']?.completed ? 'done' : 'todo',
+        action: 'error',
+        focusSubject: preferredFocus.subject,
+        focusNode: preferredFocus.node || undefined,
+      });
+    }
+
+    return plan;
+  })().sort((left, right) => {
+    const priority = { urgent: 0, todo: 1, done: 2 };
+    if (priority[left.status] !== priority[right.status]) {
+      return priority[left.status] - priority[right.status];
+    }
+    if (left.id === 'error-revive') return -1;
+    if (right.id === 'error-revive') return 1;
+    return 0;
+  });
+
+  const planTotals = todayPlan.reduce(
+    (acc, item) => {
+      acc.minutes += item.mins;
+      acc.xp += item.xp;
+      if (item.status === 'done') acc.done += 1;
+      return acc;
+    },
+    { minutes: 0, xp: 0, done: 0 }
+  );
+
+  const knowledgeMap: Record<SubjectKey, KnowledgeNode[]> = (() => {
+    const fallback = knowledgeProgressState || {
+      zh: { textbook: textbooks.zh, nodes: KNOWLEDGE_LIBRARY.zh.map((name, index) => ({ name, progress: index < 2 ? 86 : 60 })) },
+      ma: { textbook: textbooks.ma, nodes: KNOWLEDGE_LIBRARY.ma.map((name, index) => ({ name, progress: index < 2 ? 84 : 58 })) },
+      en: { textbook: textbooks.en, nodes: KNOWLEDGE_LIBRARY.en.map((name, index) => ({ name, progress: index < 2 ? 88 : 64 })) },
+    };
+
+    return {
+      zh: fallback.zh.nodes.map((node) => ({
+        name: node.name,
+        progress: node.progress,
+        state: node.progress >= 80 ? 'mastered' : node.progress >= 45 ? 'learning' : 'locked',
+      })),
+      ma: fallback.ma.nodes.map((node) => ({
+        name: node.name,
+        progress: node.progress,
+        state: node.progress >= 80 ? 'mastered' : node.progress >= 45 ? 'learning' : 'locked',
+      })),
+      en: fallback.en.nodes.map((node) => ({
+        name: node.name,
+        progress: node.progress,
+        state: node.progress >= 80 ? 'mastered' : node.progress >= 45 ? 'learning' : 'locked',
+      })),
+    };
+  })();
+
+  const handleTaskAction = (task: TaskCardData) => {
+    if (task.action === 'upload') {
+      fileInputRef.current?.click();
+      return;
+    }
+    if (task.action === 'dehydrate') {
+      dehydrateInputRef.current?.click();
+      return;
+    }
+    if (task.action === 'map') {
+      if (task.focusSubject) {
+        setMapSubject(task.focusSubject);
+      }
+      markTaskComplete('knowledge-map').catch((error) => console.error(error));
+      setCurrentScreen('subject-map');
+      return;
+    }
+    setErrorFilter(task.focusSubject ?? 'all');
+    if (task.focusSubject) {
+      setMapSubject(task.focusSubject);
+    }
+    setCurrentScreen('error-book');
+  };
+
+  const handleMapNodePress = (subject: SubjectKey, nodeName: string) => {
+    const matchedError = errorList.find((errorItem) => {
+      const meta = getErrorMeta(errorItem);
+      return meta.subject === subject && meta.node === nodeName;
+    });
+
+    setMapSubject(subject);
+    setErrorFilter(subject);
+
+    if (matchedError) {
+      setPracticeQueue([]);
+      setPracticeIndex(0);
+      generateCloneQuestion(matchedError);
+      return;
+    }
+
+    setCurrentScreen('error-book');
+  };
+
+  useEffect(() => {
+    if (!preferredFocus.subject) return;
+    setMapSubject((current) => (current === preferredFocus.subject ? current : preferredFocus.subject));
+  }, [preferredFocus.subject]);
 
   const handleUploadQuestion = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -130,39 +823,13 @@ export default function App() {
       const mimeType = file.type;
       
       try {
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) throw new Error("Missing Gemini API Key");
-
-        const ai = new GoogleGenAI({ apiKey });
-        const response = await ai.models.generateContent({
-          model: "gemini-3.1-pro-preview",
-          contents: [
-            { inlineData: { data: base64String, mimeType } },
-            { text: "You are an expert tutor. I am uploading a screenshot or photo of an exam question. Analyze it. DO NOT USE MARKDOWN IN YOUR TEXT STRING OUTPUT. ONLY USE PLAIN TEXT." }
-          ],
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                 painPoint: { type: Type.STRING, description: "What core concept is being tested and where do students usually fail? (e.g. '完形填空逻辑连词搭配混淆' or '二次函数极值点判断')" },
-                 rule: { type: Type.STRING, description: "A punchy, one-sentence rule or mnemonic to solve it. (e.g. '遇中点，连中线。构造平行四边形或中位线定理。')" },
-                 questionText: { type: Type.STRING, description: "Extract the exact question text. Ignore extraneous UI elements." },
-                 options: { type: Type.ARRAY, items: { type: Type.STRING }, description: "Extract EXACTLY 4 options. If the original question has fewer or none, you MUST create 4 plausible educational options to test this understanding." },
-                 correctAnswer: { type: Type.STRING, description: "The correct option text exactly matching one of the generated options." }
-              },
-              required: ["painPoint", "rule", "questionText", "options", "correctAnswer"]
-            }
-          }
+        const data = await analyzeQuestionImage({
+          imageBase64: base64String,
+          mimeType,
         });
-
-        if(response.text) {
-          const data: AIQuestionData = JSON.parse(response.text.trim());
-          setAiData(data);
-          setAiMode('ready');
-        } else {
-           throw new Error("No text response");
-        }
+        setAiData(data);
+        setAiMode('ready');
+        markTaskComplete('upload-question').catch((error) => console.error(error));
       } catch (err) {
         console.error("AI Analysis failed:", err);
         setAiMode('idle');
@@ -175,38 +842,16 @@ export default function App() {
   const generateCloneQuestion = async (errorItem: any) => {
     setAiMode('analyzing');
     setCurrentScreen('combat');
+    setCombatAnswer('');
 
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new Error("Missing API Key");
-
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
-        contents: `I have a student struggling with the concept "${errorItem.painPoint}". The rule they need to remember is "${errorItem.rule}". The original question was "${errorItem.questionText}". Generate a NEW, unique similar question testing the exact same rule, but with different numbers, words, or contexts. Output plain JSON.`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-               painPoint: { type: Type.STRING },
-               rule: { type: Type.STRING },
-               questionText: { type: Type.STRING },
-               options: { type: Type.ARRAY, items: { type: Type.STRING } },
-               correctAnswer: { type: Type.STRING }
-            },
-            required: ["painPoint", "rule", "questionText", "options", "correctAnswer"]
-          }
-        }
+      const data = await generateCloneQuestionViaApi({
+        painPoint: errorItem.painPoint,
+        rule: errorItem.rule,
+        questionText: errorItem.questionText,
       });
-
-      if(response.text) {
-        const data: AIQuestionData = JSON.parse(response.text.trim());
-        setAiData({ ...data, _errorId: errorItem.id } as any);
-        setAiMode('ready');
-      } else {
-         throw new Error("No text response");
-      }
+      setAiData({ ...data, _errorId: errorItem.id } as any);
+      setAiMode('ready');
     } catch (err) {
       console.error("AI Analysis failed:", err);
       setAiMode('idle');
@@ -214,59 +859,285 @@ export default function App() {
     }
   };
 
+  const scheduleTheaterInteraction = () => {
+    window.setTimeout(() => {
+      setTheaterMode('interaction');
+    }, 4000);
+  };
+
+  const generateFallbackTheaterScript = async (errorItem: any) => {
+    return generateTheaterScriptViaApi({
+      painPoint: errorItem.painPoint,
+      rule: errorItem.rule,
+    });
+  };
+
   const generateTheaterScript = async (errorItem: any) => {
     setTheaterMode('generating');
     setCurrentScreen('theater');
+    setTheaterResolution(null);
+    setTheaterMeta(null);
+    setTheaterDecisionPending(false);
+    setTheaterActionCompleted(true);
+    setTheaterSelfCheck('aligned');
+    setTheaterConfidence('medium');
+    setTheaterSelectedOption('rule-first');
+    setTheaterSequence(SEQUENCE_ACTION_STEPS);
+    setTheaterDrawCheckpoints([]);
 
     try {
-      const apiKey = process.env.GEMINI_API_KEY;
-      if (!apiKey) throw new Error("Missing API Key");
+      const errorMeta = getErrorMeta(errorItem);
+      let contentResolution: Awaited<ReturnType<typeof resolveMobiusContent>> | null = null;
 
-      // Mock update to cognitive state: Focus up, frustration up due to entering difficult challenge
-      const newCogState = { focus: Math.min(100, cogState.focus + 20), frustration: Math.min(100, cogState.frustration + 10), joy: cogState.joy };
-      setCogState(newCogState);
-      if (user) {
-        await updateCognitiveState(user.uid, newCogState);
+      try {
+        contentResolution = await resolveMobiusContent({
+          studentId: user?.uid || 'demo-student',
+          subject: errorMeta.subject,
+          grade: grade || undefined,
+          painPoint: errorItem.painPoint,
+          rule: errorItem.rule,
+          questionText: errorItem.questionText,
+        });
+      } catch (contentError) {
+        console.warn('Mobius content resolve failed, continuing with raw error item.', contentError);
       }
 
-      const ai = new GoogleGenAI({ apiKey });
-      const response = await ai.models.generateContent({
-        model: "gemini-3.1-pro-preview",
-        contents: `I need a short Manga/Interactive theater script for a student struggling with "${errorItem.painPoint}". The core rule to learn is "${errorItem.rule}".
-        Output in JSON with 'sceneIntro' (setup the dramatic situation), 'emotion' (the AI sprite's emotion based on the scenario: focused, urging, protective), 'interactionPrompt' (what the student needs to drag/draw/select to save the scene), 'successScene' (what happens if correct), and 'failureScene' (what happens if wrong). Make it Cyberpunk or Sci-fi action.`,
-        config: {
-          responseMimeType: "application/json",
-          responseSchema: {
-            type: Type.OBJECT,
-            properties: {
-               sceneIntro: { type: Type.STRING },
-               emotion: { type: Type.STRING },
-               interactionPrompt: { type: Type.STRING },
-               successScene: { type: Type.STRING },
-               failureScene: { type: Type.STRING }
-            },
-            required: ["sceneIntro", "emotion", "interactionPrompt", "successScene", "failureScene"]
-          }
-        }
+      const storySeed = contentResolution?.recommendedStorySeed;
+      const primaryKnowledgePoint = contentResolution?.matchedKnowledgePoints[0]?.knowledgePoint;
+      const relatedQuestionSummary = contentResolution?.relatedQuestions.slice(0, 2).map(({ question }) =>
+        `${question.year} ${question.region} ${question.questionType}`,
+      );
+      const studentId = user?.uid || 'demo-student';
+      let stateSummary: Awaited<ReturnType<typeof getMobiusStudentStateSummary>> | null = null;
+
+      try {
+        stateSummary = await getMobiusStudentStateSummary(studentId);
+        setStudentStateSummary(stateSummary);
+      } catch (stateSummaryError) {
+        console.warn('Mobius state summary unavailable, falling back to local defaults.', stateSummaryError);
+      }
+
+      const sessionDefaults = stateSummary?.recommendedSessionDefaults;
+
+      const mobiusSession = await createMobiusSession({
+        studentId,
+        targetScore: sessionDefaults?.targetScore ?? targetScore,
+        grade: sessionDefaults?.grade ?? grade,
+        painPoint: storySeed?.painPoint ?? errorItem.painPoint ?? sessionDefaults?.painPoint,
+        rule: storySeed?.rule ?? errorItem.rule ?? sessionDefaults?.rule,
+        questionText: storySeed?.questionText ?? errorItem.questionText,
+        diagnosedMistakes: storySeed?.diagnosedMistakes ?? contentResolution?.errorRecord.diagnosedMistakes,
+        knowledgeAction:
+          storySeed?.knowledgeAction ??
+          contentResolution?.errorRecord.knowledgeAction,
+        timeSavedMinutes: timeSaved,
+        previousState: {
+          focus: stateSummary?.currentCognitiveState?.focus ?? sessionDefaults?.previousState.focus ?? cogState.focus,
+          frustration:
+            stateSummary?.currentCognitiveState?.frustration ??
+            sessionDefaults?.previousState.frustration ??
+            cogState.frustration,
+          joy: stateSummary?.currentCognitiveState?.joy ?? sessionDefaults?.previousState.joy ?? cogState.joy,
+        },
+        learningSignals: {
+          attempts: 1,
+          correctStreak: 0,
+          wrongStreak: stateSummary?.interactionStats.lastOutcome === 'failure' ? 2 : 1,
+          timeSavedMinutes: timeSaved,
+        },
       });
 
-      if(response.text) {
-        const script: TheaterScript = JSON.parse(response.text.trim());
-        setTheaterScript(script);
-        setTheaterMode('playing');
-        
-        // Auto-progress to interaction after 4 seconds of "video"
-        setTimeout(() => {
-          setTheaterMode('interaction');
-        }, 4000);
-      } else {
-         throw new Error("No text response");
+      setCogState({
+        focus: mobiusSession.cognitiveState.focus,
+        frustration: mobiusSession.cognitiveState.frustration,
+        joy: mobiusSession.cognitiveState.joy,
+      });
+
+      if (user) {
+        await updateCognitiveState(user.uid, {
+          focus: mobiusSession.cognitiveState.focus,
+          frustration: mobiusSession.cognitiveState.frustration,
+          joy: mobiusSession.cognitiveState.joy,
+        });
       }
-    } catch (err) {
-      console.error("Script gen failed:", err);
-      setTheaterMode('idle');
-      setCurrentScreen('error-book');
+      void refreshStudentStateSummary(studentId);
+
+      setTheaterScript({
+        sceneIntro: mobiusSession.story.sceneIntro,
+        emotion: mobiusSession.story.emotion,
+        interactionPrompt: mobiusSession.story.interactionPrompt,
+        successScene: mobiusSession.story.successScene,
+        failureScene: mobiusSession.story.failureScene,
+      });
+      setTheaterMeta({
+        source: 'mobius',
+        provider: mobiusSession.video.provider,
+        providerJobId: mobiusSession.video.providerJobId,
+        videoStatus: mobiusSession.video.status,
+        videoUrl: mobiusSession.video.playbackUrl,
+        activeVideoUrl: mobiusSession.video.status === 'ready' ? mobiusSession.video.playbackUrl : undefined,
+        mediaJobId: mobiusSession.video.jobId ?? mobiusSession.sessionId.replace('mobius_', ''),
+        branchOutcome: mobiusSession.video.branchOutcome,
+        contentKnowledgePointTitle: primaryKnowledgePoint?.title,
+        contentKnowledgePointGrade: primaryKnowledgePoint?.reference.grade,
+        contentEvidence: contentResolution?.recommendedStorySeed.evidence.slice(0, 3),
+        relatedQuestionSummary,
+        diagnosedMistakeLabels: mobiusSession.errorProfile.diagnosedMistakes.map((item) => item.label),
+        knowledgeActionLabel: mobiusSession.errorProfile.knowledgeAction.label,
+        knowledgeActionType: mobiusSession.errorProfile.knowledgeAction.actionType,
+        knowledgeActionId: mobiusSession.errorProfile.knowledgeAction.id,
+      });
+      setTheaterMode('playing');
+      scheduleTheaterInteraction();
+    } catch (mobiusError) {
+      console.warn('Mobius orchestration failed, falling back to Gemini.', mobiusError);
+
+      try {
+        const newCogState = {
+          focus: Math.min(100, cogState.focus + 20),
+          frustration: Math.min(100, cogState.frustration + 10),
+          joy: cogState.joy,
+        };
+        setCogState(newCogState);
+        if (user) {
+          await updateCognitiveState(user.uid, newCogState);
+        }
+
+        const script = await generateFallbackTheaterScript(errorItem);
+        setTheaterScript(script);
+        setTheaterMeta({
+          source: 'gemini',
+          provider: 'fallback',
+          videoStatus: 'failed',
+          errorMessage: 'Mobius unavailable, using Gemini local fallback.',
+        });
+        setTheaterMode('playing');
+        scheduleTheaterInteraction();
+      } catch (err) {
+        console.error("Script gen failed:", err);
+        setTheaterMode('idle');
+        setCurrentScreen('error-book');
+      }
     }
+  };
+
+  const handleTheaterResolution = async (outcome?: 'success' | 'failure') => {
+    if (theaterDecisionPending) return;
+
+    const derivedInteractionState = (() => {
+      const actionType = theaterMeta?.knowledgeActionType;
+      if (actionType === 'select') {
+        const selected = SELECT_ACTION_OPTIONS.find((item) => item.id === theaterSelectedOption);
+        return {
+          completed: selected?.id === 'rule-first',
+          selfCheck: selected?.result ?? theaterSelfCheck,
+          note: `selected:${selected?.label ?? theaterSelectedOption}`,
+        };
+      }
+
+      if (actionType === 'sequence') {
+        const isExactOrder = theaterSequence.join('|') === SEQUENCE_ACTION_STEPS.join('|');
+        const hasRuleInMiddle = theaterSequence[1] === '触发核心规则';
+        return {
+          completed: isExactOrder,
+          selfCheck: (isExactOrder ? 'aligned' : hasRuleInMiddle ? 'partial' : 'guess') as 'aligned' | 'partial' | 'guess',
+          note: `sequence:${theaterSequence.join(' -> ')}`,
+        };
+      }
+
+      if (actionType === 'draw' || actionType === 'drag') {
+        const allKeyPointsReady = theaterDrawCheckpoints.length >= 3;
+        const partialReady = theaterDrawCheckpoints.length >= 2;
+        return {
+          completed: allKeyPointsReady,
+          selfCheck: (allKeyPointsReady ? 'aligned' : partialReady ? 'partial' : 'guess') as 'aligned' | 'partial' | 'guess',
+          note: `checkpoints:${theaterDrawCheckpoints.join(' -> ') || 'none'}`,
+        };
+      }
+
+      return {
+        completed: theaterActionCompleted,
+        selfCheck: theaterSelfCheck,
+        note: 'generic-submission',
+      };
+    })();
+
+    if (theaterMeta?.source === 'mobius' && theaterMeta.mediaJobId) {
+      try {
+        setTheaterDecisionPending(true);
+        const resolution = await resolveMobiusInteraction(theaterMeta.mediaJobId, {
+          outcome,
+          actionType: theaterMeta.knowledgeActionType ?? 'button-override',
+          submission: outcome ? undefined : {
+            actionId: theaterMeta.knowledgeActionId,
+            actionType: theaterMeta.knowledgeActionType,
+            completed: derivedInteractionState.completed,
+            confidence: theaterConfidence,
+            selfCheck: derivedInteractionState.selfCheck,
+            note: derivedInteractionState.note,
+          },
+        });
+        setTheaterResolution(resolution.outcome);
+        setTheaterScript((current) => current ? {
+          ...current,
+          successScene: outcome === 'success' ? resolution.narration : current.successScene,
+          failureScene: outcome === 'failure' ? resolution.narration : current.failureScene,
+        } : current);
+        setTheaterMeta((current) => current ? {
+          ...current,
+          provider: resolution.video?.provider ?? current.provider,
+          providerJobId: resolution.video?.providerJobId ?? current.providerJobId,
+          videoStatus: resolution.video?.status ?? current.videoStatus,
+          videoUrl: resolution.video?.playbackUrl ?? current.videoUrl,
+          activeVideoUrl: resolution.video?.status === 'ready' && resolution.video.playbackUrl
+            ? resolution.video.playbackUrl
+            : current.activeVideoUrl,
+          mediaJobId: resolution.video?.jobId ?? current.mediaJobId,
+          coachMessage: resolution.coachMessage,
+          nextActions: resolution.nextActions,
+          resolutionTitle: resolution.title,
+          branchOutcome: resolution.video?.branchOutcome ?? resolution.outcome,
+          adjudicationRationale: resolution.adjudication?.rationale,
+          errorMessage: undefined,
+        } : current);
+        setTheaterMode('resolution');
+        void refreshStudentStateSummary(user?.uid || 'demo-student');
+      } catch (error) {
+        console.warn('Mobius interaction resolve failed, falling back to local resolution.', error);
+        setTheaterMeta((current) => current ? {
+          ...current,
+          errorMessage: '交互裁决请求失败，已回退到本地分支结果。',
+        } : current);
+        setTheaterResolution(outcome);
+        setTheaterMode('resolution');
+      } finally {
+        setTheaterDecisionPending(false);
+      }
+      return;
+    }
+
+    setTheaterResolution(outcome ?? 'failure');
+    setTheaterMode('resolution');
+  };
+
+  const rotateSequenceStep = (index: number) => {
+    setTheaterSequence((current) => {
+      if (index === current.length - 1) {
+        return [current[index], ...current.slice(0, index)];
+      }
+
+      const next = [...current];
+      [next[index], next[index + 1]] = [next[index + 1], next[index]];
+      return next;
+    });
+  };
+
+  const toggleDrawCheckpoint = (checkpoint: string) => {
+    setTheaterDrawCheckpoints((current) =>
+      current.includes(checkpoint)
+        ? current.filter((item) => item !== checkpoint)
+        : [...current, checkpoint],
+    );
   };
 
   const handleDehydrateHomework = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -282,48 +1153,16 @@ export default function App() {
       const mimeType = file.type;
       
       try {
-        const apiKey = process.env.GEMINI_API_KEY;
-        if (!apiKey) throw new Error("Missing Gemini API Key");
-
-        const ai = new GoogleGenAI({ apiKey });
-        const response = await ai.models.generateContent({
-          model: "gemini-3.1-pro-preview",
-          contents: [
-            { inlineData: { data: base64String, mimeType } },
-            { text: `Analyze this entire page of school homework. The student's target score is ${targetScore}/150 (They want maximum efficiency, not perfection). 
-                     Count all the questions. Then categorize them with extreme prejudice:
-                     1. Trash/Too Easy (They already know this, waste of time).
-                     2. Drop/Too Hard (Beyond their target score ROI, skip it).
-                     3. Must Do (The sweet spot for score growth).
-                     Output strictly in the required JSON schema.` }
-          ],
-          config: {
-            responseMimeType: "application/json",
-            responseSchema: {
-              type: Type.OBJECT,
-              properties: {
-                 total: { type: Type.NUMBER },
-                 trashEasy: { type: Type.NUMBER, description: "Count of useless repetitive easy questions" },
-                 dropHard: { type: Type.NUMBER, description: "Count of ultra hard questions beyond target score" },
-                 mustDo: { type: Type.NUMBER, description: "Count of questions worth doing" },
-                 mustDoIndices: { type: Type.STRING, description: "e.g. 'Q4, Q7, Q12'" },
-                 reasoning: { type: Type.STRING, description: "A highly confident, rebellious one-sentence reason why the rest is trash." }
-              },
-              required: ["total", "trashEasy", "dropHard", "mustDo", "mustDoIndices", "reasoning"]
-            }
-          }
+        const data = await dehydrateHomeworkViaApi({
+          imageBase64: base64String,
+          mimeType,
+          targetScore,
         });
-
-        if(response.text) {
-          const data: DehydrateResult = JSON.parse(response.text.trim());
-          setDehydrateData(data);
-          setDehydrateMode('ready');
-          
-          if (data.trashEasy + data.dropHard > 0) {
-            handleTimeSavedUpdate((data.trashEasy + data.dropHard) * 5); // 5 mins saved per skipped question
-          }
-        } else {
-           throw new Error("No text response");
+        setDehydrateData(data);
+        setDehydrateMode('ready');
+        
+        if (data.trashEasy + data.dropHard > 0) {
+          handleTimeSavedUpdate((data.trashEasy + data.dropHard) * 5); // 5 mins saved per skipped question
         }
       } catch (err) {
         console.error("Dehydrate Analysis failed:", err);
@@ -353,7 +1192,7 @@ export default function App() {
           transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
           className="bg-white border-4 border-[#1a1a2e] rounded-full w-24 h-24 flex items-center justify-center mb-8 shadow-[4px_4px_0_#1a1a2e]"
         >
-          <img src="https://api.dicebear.com/7.x/bottts/svg?seed=freescore" alt="AI Mascot" className="w-16 h-16" />
+          <img src="https://api.dicebear.com/7.x/bottts/svg?seed=liezi-yufeng" alt="列子御风 AI 伙伴" className="w-16 h-16" />
         </motion.div>
         
         <h1 className="text-4xl font-display font-bold leading-tight mb-4 text-[#1a1a2e]">
@@ -389,6 +1228,12 @@ export default function App() {
         
         <button className="mt-4 font-bold text-gray-500 flex items-center gap-2 py-2 px-4 hover:bg-gray-200 rounded-full transition-colors">
           <Clock size={18} /> 看看我省回多少时间
+        </button>
+        <button
+          onClick={enterDemoMode}
+          className="mt-3 font-bold text-[var(--color-primary)] flex items-center gap-2 py-2 px-4 bg-[var(--color-primary)]/10 rounded-full border border-[var(--color-primary)]/20 transition-colors"
+        >
+          <Zap size={18} /> 直接体验 Demo
         </button>
       </div>
     </motion.div>
@@ -479,7 +1324,7 @@ export default function App() {
       >
         <BrainCircuit size={64} />
       </motion.div>
-      <h2 className="text-2xl font-display font-bold mt-6 tracking-wider">FreeScore AI 演算中</h2>
+      <h2 className="text-2xl font-display font-bold mt-6 tracking-wider">列子御风 AI 演算中</h2>
       
       <div className="mt-8 space-y-3 w-64">
         {[
@@ -610,7 +1455,6 @@ export default function App() {
       exit={{ opacity: 0, x: -20 }}
       className="absolute inset-0 w-full h-full flex flex-col bg-gray-50 pb-24"
     >
-      {/* Top Header */}
       <div className="bg-[var(--color-primary)] text-white p-6 pt-10 rounded-b-[40px] shadow-lg border-b-4 border-[#1a1a2e] relative z-10">
         <div className="flex justify-between items-center mb-6">
           <div className="flex items-center gap-3">
@@ -618,234 +1462,340 @@ export default function App() {
               <img src={user?.photoURL || "https://api.dicebear.com/7.x/notionists/svg?seed=Alex"} alt="Avatar" className="w-10 h-10 rounded-full" />
             </div>
             <div>
-              <h2 className="font-bold text-lg leading-tight">{user ? user.displayName?.split(' ')[0] : 'Alex'} 的自由岛 {grade ? `· ${grade}` : ''}</h2>
-              <p className="text-xs font-bold text-white/80">LV.12 觉醒者</p>
+              <h2 className="font-bold text-lg leading-tight">{user ? user.displayName?.split(' ')[0] : 'Alex'} 的列子风场 {grade ? `· ${grade}` : ''}</h2>
+              <p className="text-xs font-bold text-white/80">今日只做最值当的题</p>
             </div>
           </div>
           <div className="flex gap-2 items-center">
-            <div className="bg-white/20 px-3 py-1 rounded-full border border-white/40 flex items-center gap-1 font-bold">
-              <Clock size={16} /> 储备 {timeSaved} 分钟
+            <div className="bg-white/20 px-3 py-1 rounded-full border border-white/40 flex items-center gap-1 font-bold text-xs">
+              <Clock size={14} /> 已省回 {timeSaved} 分钟
             </div>
+            <button
+              onClick={() => { void toggleTheaterCueEnabled(); }}
+              className="bg-white/20 px-3 py-1 rounded-full border border-white/40 text-xs font-bold flex items-center gap-1"
+            >
+              {theaterCueEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
+              {theaterCueEnabled ? 'Cue 开' : 'Cue 关'}
+            </button>
             {user && (
               <button 
-                onClick={() => { logoutUser(); setCurrentScreen('welcome'); }}
+                onClick={() => { logoutUser(); setDemoMode(false); setCurrentScreen('welcome'); }}
                 className="bg-white/20 px-3 py-1 rounded-full border border-white/40 text-xs font-bold"
               >
                 登出
               </button>
             )}
+            {!user && demoMode && (
+              <button
+                onClick={() => { setDemoMode(false); setCurrentScreen('welcome'); }}
+                className="bg-white/20 px-3 py-1 rounded-full border border-white/40 text-xs font-bold"
+              >
+                退出 Demo
+              </button>
+            )}
           </div>
         </div>
-        
-        <div className="flex gap-4">
-          <div className="flex-1 bg-white text-[#1a1a2e] p-3 rounded-2xl border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e] flex flex-col items-center">
-            <span className="text-xs font-bold text-gray-500 mb-1">当前战力</span>
-            <span className="text-2xl font-display font-bold text-[var(--color-primary)]">85<span className="text-sm">/150</span></span>
+
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-white text-[#1a1a2e] p-3 rounded-2xl border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e] text-center">
+            <div className="text-xs font-bold text-gray-500 mb-1">目标分</div>
+            <div className="text-2xl font-display font-bold text-[var(--color-primary)]">{targetScore}</div>
           </div>
-          <div className="flex-1 bg-[--color-secondary] text-[#1a1a2e] p-3 rounded-2xl border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e] flex flex-col items-center">
-            <span className="text-xs font-bold text-[#1a1a2e]/90 mb-1">今日控分目标</span>
-            <span className="text-2xl font-display font-bold text-[#1a1a2e]">{targetScore}<span className="text-sm"> 分</span></span>
+          <div className="bg-white text-[#1a1a2e] p-3 rounded-2xl border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e] text-center">
+            <div className="text-xs font-bold text-gray-500 mb-1">今日任务</div>
+            <div className="text-2xl font-display font-bold text-[var(--color-secondary)]">{todayPlan.length}</div>
+          </div>
+          <div className="bg-white text-[#1a1a2e] p-3 rounded-2xl border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e] text-center">
+            <div className="text-xs font-bold text-gray-500 mb-1">待修错题</div>
+            <div className="text-2xl font-display font-bold text-[var(--color-accent-pink)]">{errorStats.total}</div>
           </div>
         </div>
       </div>
 
-      {/* Main Content */}
       <div className="flex-1 p-6 overflow-y-auto w-full max-w-lg mx-auto">
-        <div className="flex justify-between items-end mb-4">
-          <h3 className="font-display text-2xl font-bold flex items-center gap-2">
-            <Target className="text-[var(--color-secondary)]" /> AI 定制任务
-          </h3>
-          <span className="text-sm font-bold text-gray-500">
-            预计耗时 {Math.max(0, Math.ceil((targetScore - 85) * 1.5))} 分钟
-          </span>
+        <div className="game-card p-5 mb-6 bg-[#1a1a2e] text-white border-0 relative overflow-hidden">
+          <div className="absolute top-0 right-0 p-4 opacity-10"><Target size={96} /></div>
+          <div className="flex items-center justify-between mb-3 relative z-10">
+            <h3 className="font-display text-2xl font-bold">今日任务</h3>
+            <span className="text-xs font-bold bg-white/10 px-3 py-1 rounded-full border border-white/15">
+              {planTotals.minutes} 分钟 · {planTotals.xp} XP
+            </span>
+          </div>
+          <p className="text-sm text-gray-300 font-medium relative z-10">
+            系统已按 {targetScore} 分目标重排路线。先修最值钱的失分点，再决定要不要继续扩张。
+          </p>
         </div>
 
-        <div className="space-y-4">
-          {/* Dehydrator Banner */}
-          <div 
-            onClick={() => dehydrateInputRef.current?.click()}
-            className="game-card p-5 relative overflow-hidden flex flex-col bg-[#1a1a2e] text-white border-4 border-[var(--color-secondary)] shadow-[0_0_15px_var(--color-secondary)] cursor-pointer mb-6 transform transition-transform hover:-translate-y-1"
-          >
-            <input type="file" accept="image/*" ref={dehydrateInputRef} className="hidden" onChange={handleDehydrateHomework} />
-            <div className="absolute top-0 right-0 p-4 opacity-20"><Zap size={100} className="text-[var(--color-secondary)]" /></div>
-            
-            <div className="flex items-center gap-2 mb-2 relative z-10">
-              <h3 className="font-display font-bold text-2xl text-[var(--color-secondary)]">学校作业脱水舱</h3>
-              <span className="bg-red-500 text-white text-[10px] px-2 py-0.5 rounded font-bold uppercase animate-pulse">禁忌功能</span>
+        <div className="game-card p-4 mb-6 bg-white border-2 border-[#1a1a2e]">
+          <div className="flex items-center justify-between mb-3">
+            <div>
+              <h3 className="font-bold text-lg text-[#1a1a2e] flex items-center gap-2">
+                <BrainCircuit size={18} className="text-[var(--color-primary)]" /> 长期学生状态
+              </h3>
+              <p className="text-xs text-gray-500 font-medium mt-1">现在的默认节奏，已经开始从历史 session 自动长出来。</p>
             </div>
-            
-            <p className="text-sm font-bold text-gray-400 mb-4 h-10 relative z-10">
-              拍下老师发的整张试卷。AI 将基于你的控分目标，彻底摧毁无用题海，只留精华。
-            </p>
-            
-            <div className="flex items-center justify-between mt-auto relative z-10">
-              <span className="text-gray-400 font-bold text-xs bg-white/10 px-2 py-1 rounded-full border border-gray-600">
-                Gemini 纯视觉扫描判卷
-              </span>
-              <button 
-                className="game-btn bg-[var(--color-secondary)] text-[#1a1a2e] px-4 py-2 text-sm flex items-center gap-1 border-2 border-transparent"
-              >
-                <UploadCloud size={16} /> 立即脱水
-              </button>
-            </div>
+            <button
+              onClick={() => { void refreshStudentStateSummary(user?.uid || 'demo-student'); }}
+              className="text-[11px] font-bold text-[var(--color-primary)]"
+            >
+              刷新
+            </button>
           </div>
 
-          {/* AI Multimodal Upload Zone */}
-          <div 
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            {studentModelCards.map((item) => (
+              <div key={item.label} className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-center">
+                <div className={`text-base font-display font-bold ${item.tone}`}>{item.value}</div>
+                <div className="mt-1 text-[10px] font-bold text-gray-500">{item.label}</div>
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-2 text-sm">
+            <div className="rounded-xl border border-gray-100 bg-white p-3">
+              <p className="text-[11px] font-bold text-gray-500 mb-1">近期高频痛点</p>
+              <p className="font-bold text-[#1a1a2e]">
+                {studentStateSummary?.recentPainPoints?.slice(0, 2).join(' · ') || '还在等待第一批可积累状态'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-100 bg-white p-3">
+              <p className="text-[11px] font-bold text-gray-500 mb-1">当前活跃规则</p>
+              <p className="font-bold text-[#1a1a2e]">
+                {studentStateSummary?.activeRules?.[0] || '完成 1 次剧场交互后，这里会出现长期默认规则。'}
+              </p>
+            </div>
+            <div className="rounded-xl border border-gray-100 bg-white p-3">
+              <p className="text-[11px] font-bold text-gray-500 mb-1">认知状态快照</p>
+              <p className="font-medium text-gray-700">
+                Focus {studentStateSummary?.currentCognitiveState?.focus ?? '--'} / Frustration {studentStateSummary?.currentCognitiveState?.frustration ?? '--'} / Joy {studentStateSummary?.currentCognitiveState?.joy ?? '--'}
+              </p>
+            </div>
+          </div>
+        </div>
+
+        <div className="space-y-3 mb-6">
+          {todayPlan.map((task) => {
+            const meta = SUBJECT_META[task.subject];
+            const statusLabel = task.status === 'urgent' ? '优先' : task.status === 'done' ? '已完成' : '待执行';
+            const statusClass = task.status === 'urgent'
+              ? 'bg-[#1a1a2e] text-white'
+              : task.status === 'done'
+                ? 'bg-[var(--color-accent-green)] text-[#1a1a2e]'
+                : 'bg-white text-gray-500';
+
+            return (
+              <div key={task.id} className="game-card p-4 relative overflow-hidden">
+                <div className="absolute -right-5 -top-5 w-20 h-20 rounded-full opacity-20" style={{ backgroundColor: meta.color }}></div>
+                <div className="flex justify-between items-start gap-3 mb-3">
+                  <div>
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-bold px-2 py-1 rounded border-2 border-[#1a1a2e]" style={{ backgroundColor: meta.color, color: task.subject === 'en' ? '#1a1a2e' : '#fff' }}>
+                        {meta.name}
+                      </span>
+                      <span className={`text-[11px] font-bold px-2 py-1 rounded-full border ${statusClass}`}>{statusLabel}</span>
+                    </div>
+                    <h4 className="font-bold text-lg text-[#1a1a2e]">{task.title}</h4>
+                    <p className="text-sm text-gray-600 font-medium mt-1 leading-relaxed">{task.detail}</p>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-xs font-bold text-gray-500 flex items-center gap-1 justify-end"><Clock size={12} /> {task.mins}min</div>
+                    <div className="text-sm font-bold mt-2" style={{ color: meta.color }}>+{task.xp} XP</div>
+                  </div>
+                </div>
+
+                <button
+                  onClick={() => handleTaskAction(task)}
+                  className="game-btn bg-[var(--color-primary)] text-white w-full py-3 text-sm flex justify-center items-center gap-2"
+                >
+                  {task.status === 'done' ? '再执行一次' : '开始这一步'} <ChevronRight size={16} />
+                </button>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3 mb-6">
+          <button
             onClick={() => fileInputRef.current?.click()}
-            className="game-card p-5 relative overflow-hidden flex flex-col bg-[var(--color-secondary)] border-4 border-[#1a1a2e] shadow-[4px_4px_0_#1a1a2e] cursor-pointer mb-2 transform transition-transform hover:-translate-y-1"
+            className="game-card p-4 text-left bg-[var(--color-secondary)] border-4 border-[#1a1a2e] shadow-[4px_4px_0_#1a1a2e]"
           >
             <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleUploadQuestion} />
-            <div className="absolute top-0 right-0 p-4 opacity-10"><Camera size={100} className="text-[#1a1a2e]" /></div>
-            
-            <div className="flex items-center gap-2 mb-3 relative z-10">
-              <div className="bg-white p-2 rounded-full border-2 border-[#1a1a2e]"><BrainCircuit size={20} className="text-[var(--color-primary)]" /></div>
-              <h3 className="font-display font-bold text-xl text-[#1a1a2e]">AI 多模态拍题破解</h3>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="bg-white p-2 rounded-full border-2 border-[#1a1a2e]"><Camera size={18} className="text-[#1a1a2e]" /></div>
+              <span className="font-display font-bold text-[#1a1a2e]">拍题破局</span>
             </div>
-            
-            <p className="text-sm font-bold text-[#1a1a2e]/80 mb-4 h-10 relative z-10">
-              遇到不会的题？直接拍照，FreeScore Engine 将秒级重构底层知识逻辑并生成“一句话法则”。
-            </p>
-            
-            <div className="flex items-center justify-between mt-auto relative z-10">
-              <span className="text-[#1a1a2e] font-bold text-sm bg-white/40 px-2 py-1 rounded-full border-2 border-[#1a1a2e]">
-                接入 Gemini 1.5 Pro
-              </span>
-              <button 
-                className="game-btn bg-white text-[#1a1a2e] px-4 py-2 text-sm flex items-center gap-1"
-              >
-                <UploadCloud size={16} /> 立即上传
-              </button>
-            </div>
-          </div>
+            <p className="text-sm font-bold text-[#1a1a2e]/80">上传真实难题，直接拆出法则与检测题。</p>
+          </button>
 
-          <div className="flex justify-between items-end mb-2 mt-6">
-            <h3 className="font-display text-xl font-bold flex items-center gap-1">
-              <Target size={20} className="text-[var(--color-secondary)]" /> 专属学习列车
+          <button
+            onClick={() => dehydrateInputRef.current?.click()}
+            className="game-card p-4 text-left bg-[#1a1a2e] text-white border-4 border-[var(--color-secondary)] shadow-[0_0_15px_var(--color-secondary)]"
+          >
+            <input type="file" accept="image/*" ref={dehydrateInputRef} className="hidden" onChange={handleDehydrateHomework} />
+            <div className="flex items-center gap-2 mb-3">
+              <div className="bg-white/10 p-2 rounded-full border border-white/15"><Zap size={18} className="text-[var(--color-secondary)]" /></div>
+              <span className="font-display font-bold text-[var(--color-secondary)]">作业脱水</span>
+            </div>
+            <p className="text-sm font-bold text-gray-300">整页作业拍进来，系统只留下必须做的题。</p>
+          </button>
+        </div>
+
+        <div className="game-card p-4">
+          <div className="flex items-center justify-between mb-3">
+            <h3 className="font-bold text-lg text-[#1a1a2e] flex items-center gap-2">
+              <RefreshCw size={18} className="text-[var(--color-secondary)]" /> 错题雷达
             </h3>
+            <button
+              onClick={() => setCurrentScreen('error-book')}
+              className="text-sm font-bold text-[var(--color-primary)]"
+            >
+              查看全部
+            </button>
           </div>
-
-          {/* Card 1 */}
-          <div className="game-card p-4 relative overflow-hidden flex flex-col">
-            <div className="absolute -right-4 -top-4 bg-[var(--color-subj-ma)] w-16 h-16 rounded-full opacity-20"></div>
-            <div className="flex justify-between items-start mb-2">
-              <span className="bg-[var(--color-subj-ma)] text-white text-xs font-bold px-2 py-1 rounded border-2 border-[#1a1a2e]">极光数学</span>
-              <span className="text-xs font-bold text-gray-500 flex items-center gap-1"><Clock size={12}/> 5min</span>
+          <div className="grid grid-cols-4 gap-2">
+            <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
+              <div className="text-xl font-display font-bold text-[#1a1a2e]">{errorStats.total}</div>
+              <div className="text-[10px] font-bold text-gray-500 mt-1">总错题</div>
             </div>
-            <h4 className="font-bold text-lg mb-1 relative z-10">必拿分：几何辅助线</h4>
-            <p className="text-sm text-gray-600 mb-4 font-medium h-10">近 3 次考试相似题丢分，只需掌握【遇中点连中线】，立刻保底 +4 分。</p>
-            <div className="flex items-center justify-between mt-auto">
-              <span className="text-[var(--color-secondary)] font-bold text-sm flex items-center gap-1">
-                <Star size={16} fill="currentColor"/> 预计收益高
-              </span>
-              <button 
-                onClick={() => setCurrentScreen('combat')}
-                className="game-btn bg-[var(--color-subj-ma)] text-white px-6 py-2 text-sm"
+            <div className="rounded-xl p-3 text-center border" style={{ backgroundColor: SUBJECT_META.zh.light, borderColor: 'rgba(255,93,115,0.15)' }}>
+              <div className="text-xl font-display font-bold" style={{ color: SUBJECT_META.zh.color }}>{errorStats.zh}</div>
+              <div className="text-[10px] font-bold text-gray-500 mt-1">语文</div>
+            </div>
+            <div className="rounded-xl p-3 text-center border" style={{ backgroundColor: SUBJECT_META.ma.light, borderColor: 'rgba(0,180,216,0.15)' }}>
+              <div className="text-xl font-display font-bold" style={{ color: SUBJECT_META.ma.color }}>{errorStats.ma}</div>
+              <div className="text-[10px] font-bold text-gray-500 mt-1">数学</div>
+            </div>
+            <div className="rounded-xl p-3 text-center border" style={{ backgroundColor: SUBJECT_META.en.light, borderColor: 'rgba(255,190,11,0.15)' }}>
+              <div className="text-xl font-display font-bold" style={{ color: SUBJECT_META.en.color }}>{errorStats.en}</div>
+              <div className="text-[10px] font-bold text-gray-500 mt-1">英语</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </motion.div>
+  );
+
+  const renderSubjectMap = () => {
+    const activeMeta = SUBJECT_META[mapSubject];
+    const activeNodes = knowledgeMap[mapSubject];
+    const learningCount = activeNodes.filter((node) => node.state === 'learning').length;
+    const masteredCount = activeNodes.filter((node) => node.state === 'mastered').length;
+    const activeTextbook = textbooks[mapSubject as keyof typeof textbooks];
+    const overallProgress = Math.round(activeNodes.reduce((sum, node) => sum + node.progress, 0) / Math.max(activeNodes.length, 1));
+    const recommendedNodeActive = mapSubject === preferredFocus.subject ? preferredFocus.node : '';
+
+    return (
+      <motion.div 
+        key="subject-map"
+        initial={{ opacity: 0, x: 20 }}
+        animate={{ opacity: 1, x: 0 }}
+        exit={{ opacity: 0, x: -20 }}
+        className="absolute inset-0 w-full h-full flex flex-col bg-[#F4F6FB] pb-24"
+      >
+        <div className="text-white p-6 pt-10 rounded-b-[40px] shadow-lg border-b-4 border-[#1a1a2e] relative z-10" style={{ backgroundColor: activeMeta.color }}>
+          <h2 className="text-2xl font-display font-bold flex items-center gap-2"><MapIcon /> {activeMeta.name} · 知识地图</h2>
+          <p className="text-sm font-bold text-white/80 mt-2">当前教材：{activeTextbook}。点亮已掌握节点，盯住正在失血的区域，锁住暂时不该花时间的深水区。</p>
+          <div className="mt-4 bg-white/15 rounded-2xl p-3 border border-white/20">
+            <div className="flex justify-between text-xs font-bold mb-2">
+              <span>{activeMeta.textbookLabel}</span>
+              <span>{overallProgress}%</span>
+            </div>
+            <div className="h-3 bg-black/20 rounded-full overflow-hidden">
+              <div className="h-full bg-white rounded-full transition-all" style={{ width: `${overallProgress}%` }}></div>
+            </div>
+          </div>
+          <div className="flex gap-2 mt-4 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden">
+            {(['zh', 'ma', 'en'] as SubjectKey[]).map((subject) => (
+              <button
+                key={subject}
+                onClick={() => setMapSubject(subject)}
+                className={`px-4 py-1 font-bold rounded-full border-2 text-sm whitespace-nowrap ${mapSubject === subject ? 'bg-white text-[#1a1a2e] border-[#1a1a2e]' : 'bg-black/20 text-white border-transparent'}`}
               >
-                开始修复
+                {SUBJECT_META[subject].name}
               </button>
-            </div>
-          </div>
-
-          {/* Card 2 */}
-          <div className="game-card p-4 relative overflow-hidden flex flex-col">
-            <div className="absolute -right-4 -top-4 bg-[var(--color-subj-en)] w-16 h-16 rounded-full opacity-20"></div>
-            <div className="flex justify-between items-start mb-2">
-              <span className="bg-[var(--color-subj-en)] text-[#1a1a2e] text-xs font-bold px-2 py-1 rounded border-2 border-[#1a1a2e]">阳光英语</span>
-              <span className="text-xs font-bold text-gray-500 flex items-center gap-1"><Clock size={12}/> 8min</span>
-            </div>
-            <h4 className="font-bold text-lg mb-1 relative z-10">高危失分：完形逻辑词</h4>
-            <p className="text-sm text-gray-600 mb-4 font-medium h-10">错因分析：although 与 despite 用法混淆。彻底解决防止连环扣分。</p>
-            <div className="flex items-center justify-between mt-auto">
-              <span className="text-[var(--color-accent-pink)] font-bold text-sm flex items-center gap-1">
-                <ShieldAlert size={16} /> 易错陷阱
-              </span>
-              <button className="game-btn bg-gray-200 text-gray-400 px-6 py-2 text-sm border-gray-400 opacity-80 cursor-not-allowed">
-                锁 定
-              </button>
-            </div>
-          </div>
-          
-          {/* Card 3 */}
-          <div className="game-card p-4 relative overflow-hidden flex flex-col">
-            <div className="absolute -right-4 -top-4 bg-[var(--color-subj-zh)] w-16 h-16 rounded-full opacity-20"></div>
-            <div className="flex justify-between items-start mb-2">
-              <span className="bg-[var(--color-subj-zh)] text-white text-xs font-bold px-2 py-1 rounded border-2 border-[#1a1a2e]">丹青语文</span>
-              <span className="text-xs font-bold text-gray-500 flex items-center gap-1"><Clock size={12}/> 3min</span>
-            </div>
-            <h4 className="font-bold text-lg mb-1 relative z-10">记忆复活：古诗默写</h4>
-            <p className="text-sm text-gray-600 mb-4 font-medium h-10">《登高》距离上次复现已过 7 天，现在复习记忆保持率提升至 90%。</p>
-            <div className="flex items-center justify-between mt-auto">
-              <span className="text-[var(--color-accent-green)] font-bold text-sm flex items-center gap-1">
-                <RefreshCw size={16} /> 最佳复习期
-              </span>
-              <button className="game-btn bg-gray-200 text-gray-400 px-6 py-2 text-sm border-gray-400 opacity-80 cursor-not-allowed">
-                锁 定
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  );
-
-  const renderSubjectMap = () => (
-    <motion.div 
-      key="subject-map"
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      className="absolute inset-0 w-full h-full flex flex-col bg-[#F4F6FB] pb-24"
-    >
-      <div className="bg-[var(--color-subj-zh)] text-white p-6 pt-10 rounded-b-[40px] shadow-lg border-b-4 border-[#1a1a2e] relative z-10">
-        <h2 className="text-2xl font-display font-bold flex items-center gap-2"><MapIcon /> 丹青语文 · 文海拾光</h2>
-        <div className="flex gap-2 mt-4 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden">
-          <button className="px-4 py-1 bg-white text-[var(--color-subj-zh)] font-bold rounded-full border-2 border-[#1a1a2e] text-sm whitespace-nowrap">基础塔 100%</button>
-          <button className="px-4 py-1 bg-black/20 text-white font-bold rounded-full border-2 border-transparent text-sm whitespace-nowrap">宝库 35%</button>
-          <button className="px-4 py-1 bg-[#1a1a2e] text-[var(--color-accent-pink)] font-bold rounded-full border-2 border-transparent text-sm whitespace-nowrap shadow-[0_0_10px_rgba(255,20,147,0.5)]">战略放弃区 (深渊)</button>
-        </div>
-      </div>
-      <div className="flex-1 p-6 relative overflow-y-auto w-full max-w-lg mx-auto flex flex-col items-center pt-10">
-        {/* Map Path Line */}
-        <div className="absolute top-0 bottom-0 left-1/2 -translate-x-1/2 w-2 border-l-4 border-dashed border-gray-300"></div>
-        
-        {/* Node 4 - THE ABANDONED NODE */}
-        <div className="relative z-10 flex flex-col items-center mb-12 transform translate-x-14">
-          <div className="bg-[#1a1a2e] w-14 h-14 rounded-full border-4 border-gray-600 flex items-center justify-center text-[var(--color-accent-pink)] mb-2 shadow-[0_0_15px_var(--color-accent-pink)] animate-pulse">
-            <Lock size={20} />
-          </div>
-          <div className="flex flex-col items-center">
-            <span className="font-bold text-gray-500 line-through decoration-2">文言虚词穷举</span>
-            <span className="bg-red-500 text-white text-[9px] px-1.5 py-0.5 rounded font-bold uppercase mt-1">系统强行劝退</span>
+            ))}
           </div>
         </div>
 
-        {/* Node 3 */}
-        <div className="relative z-10 flex flex-col items-center mb-12">
-          <div className="bg-gray-300 w-16 h-16 rounded-full border-4 border-[#1a1a2e] flex items-center justify-center text-gray-500 mb-2 shadow-[2px_2px_0_rgba(0,0,0,0.1)]">
-            <Lock size={24} />
-          </div>
-          <span className="font-bold text-gray-400">词义推断</span>
-        </div>
+        <div className="flex-1 p-6 overflow-y-auto w-full max-w-lg mx-auto">
+          {recommendedNodeActive ? (
+            <div className="mb-4 rounded-2xl border-2 border-[#1a1a2e] bg-white px-4 py-3 shadow-[3px_3px_0_#1a1a2e]">
+              <p className="text-[11px] font-bold text-gray-500 mb-1">AI 推荐修复节点</p>
+              <p className="font-bold text-[#1a1a2e]">
+                先处理“{recommendedNodeActive}”
+                {studentStateSummary?.interactionStats.lastOutcome === 'failure' ? '，因为最近一次裁决还没命中规则。' : '，这是最近长期状态里最该优先收口的一块。'}
+              </p>
+            </div>
+          ) : null}
 
-        {/* Node 2 - ACTIVE */}
-        <div className="relative z-10 flex flex-col items-center mb-12 transform -translate-x-10 cursor-pointer" onClick={() => setCurrentScreen('combat')}>
-          <div className="bg-[var(--color-secondary)] w-20 h-20 rounded-full border-4 border-[#1a1a2e] shadow-[4px_4px_0_#1a1a2e] flex items-center justify-center text-white mb-2">
-            <Flame size={32} />
+          <div className="grid grid-cols-3 gap-3 mb-6">
+            <div className="game-card p-4 text-center">
+              <div className="text-2xl font-display font-bold text-[var(--color-accent-green)]">{masteredCount}</div>
+              <div className="text-xs font-bold text-gray-500 mt-1">已掌握</div>
+            </div>
+            <div className="game-card p-4 text-center">
+              <div className="text-2xl font-display font-bold text-[var(--color-secondary)]">{learningCount}</div>
+              <div className="text-xs font-bold text-gray-500 mt-1">修复中</div>
+            </div>
+            <div className="game-card p-4 text-center">
+              <div className="text-2xl font-display font-bold text-gray-400">{activeNodes.length - learningCount - masteredCount}</div>
+              <div className="text-xs font-bold text-gray-500 mt-1">未启动</div>
+            </div>
           </div>
-          <span className="font-bold text-[#1a1a2e] bg-white px-3 py-1 rounded-full border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e]">古诗默写</span>
-        </div>
 
-        {/* Node 1 - CLEARED */}
-        <div className="relative z-10 flex flex-col items-center transform translate-x-10">
-          <div className="bg-[var(--color-accent-green)] w-16 h-16 rounded-full border-4 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e] flex items-center justify-center text-[#1a1a2e] mb-2">
-            <Check size={28} strokeWidth={4} />
+          <div className="space-y-4">
+            {activeNodes.map((node, index) => {
+              const isLearning = node.state === 'learning';
+              const isMastered = node.state === 'mastered';
+              const offset = index % 2 === 0 ? 'translate-x-8' : '-translate-x-8';
+              const isRecommended = Boolean(recommendedNodeActive && node.name === recommendedNodeActive);
+
+              return (
+                <div key={node.name} className={`relative flex flex-col items-center ${offset}`}>
+                  {index !== activeNodes.length - 1 && (
+                    <div className="absolute top-16 h-12 border-l-4 border-dashed border-gray-300"></div>
+                  )}
+                  {isRecommended && (
+                    <div className="absolute -top-2 z-20 rounded-full bg-[var(--color-secondary)] px-3 py-1 text-[10px] font-black text-[#1a1a2e] border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e]">
+                      AI 推荐修复
+                    </div>
+                  )}
+                  <button
+                    onClick={() => handleMapNodePress(mapSubject, node.name)}
+                    className={`relative z-10 w-18 h-18 rounded-full border-4 mb-3 flex items-center justify-center transition-transform ${node.state === 'locked' ? 'cursor-pointer bg-gray-200 text-gray-400 border-[#1a1a2e]' : 'cursor-pointer hover:scale-105 border-[#1a1a2e]'}`}
+                    style={{
+                      width: isRecommended ? 92 : isLearning ? 84 : 72,
+                      height: isRecommended ? 92 : isLearning ? 84 : 72,
+                      backgroundColor: isMastered ? 'var(--color-accent-green)' : isLearning ? activeMeta.color : '#d1d5db',
+                      color: isLearning ? '#fff' : isMastered ? '#1a1a2e' : '#6b7280',
+                      boxShadow: isRecommended
+                        ? `0 0 0 4px rgba(255,190,11,0.35), 4px 4px 0 #1a1a2e`
+                        : isLearning
+                          ? '4px 4px 0 #1a1a2e'
+                          : '2px 2px 0 rgba(26,26,46,0.25)',
+                    }}
+                  >
+                    {isMastered ? <Check size={26} strokeWidth={3.5} /> : isLearning ? <Flame size={28} /> : <Lock size={22} />}
+                  </button>
+                  <div className="text-center max-w-[180px]">
+                    <div className={`inline-flex px-3 py-1 rounded-full border-2 border-[#1a1a2e] font-bold text-sm ${isLearning ? 'bg-white shadow-[2px_2px_0_#1a1a2e]' : isMastered ? 'bg-[var(--color-accent-green)] text-[#1a1a2e]' : 'bg-white text-gray-400'} ${isRecommended ? 'ring-2 ring-[var(--color-secondary)]' : ''}`}>
+                      {node.name}
+                    </div>
+                    <div className="text-sm font-display font-bold mt-2" style={{ color: isLearning ? activeMeta.color : isMastered ? 'var(--color-accent-green)' : '#9ca3af' }}>
+                      {node.progress}%
+                    </div>
+                    <div className="text-xs font-bold text-gray-500 mt-2">
+                      {isRecommended ? '系统建议先修这一个' : isLearning ? '点击直接去修复' : isMastered ? '已稳定拿分' : '暂未进入今日主线'}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
-          <span className="font-bold text-[#1a1a2e]">多音字辨析</span>
         </div>
-      </div>
-    </motion.div>
-  );
+      </motion.div>
+    );
+  };
 
   const renderErrorBook = () => (
     <motion.div 
@@ -857,50 +1807,172 @@ export default function App() {
     >
       <div className="p-6 pt-10 flex-1 overflow-y-auto">
         <h2 className="text-3xl font-display font-bold text-[#1a1a2e] flex items-center gap-2 mb-2">
-          <RefreshCw className="text-[var(--color-secondary)]" /> 记忆复活站
+          <RefreshCw className="text-[var(--color-secondary)]" /> 错题本增强
         </h2>
-        <p className="text-gray-500 font-bold mb-6 text-sm">错题不是用来收藏的，我们用它精准提分。</p>
-        
-        <div className="flex gap-2 mb-6">
-          <button className="flex-1 bg-[#1a1a2e] text-white font-bold py-2 rounded-xl border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e]">{errorList.length > 0 ? "急救中" : "无急救"}</button>
-          <button className="flex-1 bg-white text-gray-400 font-bold py-2 rounded-xl border-2 border-gray-200">72h 巩固</button>
-          <button className="flex-1 bg-white text-gray-400 font-bold py-2 rounded-xl border-2 border-gray-200">7d 保分</button>
+        <p className="text-gray-500 font-bold mb-6 text-sm">不再只是收藏夹。这里负责筛选、重做、消灭和退出重复失分。</p>
+
+        <div className="game-card p-4 mb-5 border-2 border-[#1a1a2e] bg-[#1a1a2e] text-white">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-xs font-bold text-white/60 mb-1">长期状态摘要</p>
+              <p className="font-bold text-sm leading-relaxed">
+                {studentStateSummary?.interactionStats.lastOutcome === 'success'
+                  ? '最近一次剧场裁决命中了规则，可以继续做窄提示强化。'
+                  : studentStateSummary?.interactionStats.lastOutcome === 'failure'
+                    ? '最近一次剧场裁决未命中规则，当前更适合保护性引导。'
+                    : '还没有足够的长期裁决数据，先从首轮剧场重构开始。'}
+              </p>
+            </div>
+            <div className="text-right shrink-0">
+              <div className="text-xl font-display font-bold text-[var(--color-secondary)]">
+                {studentStateSummary?.interactionStats.successCount ?? 0}/{(studentStateSummary?.interactionStats.successCount ?? 0) + (studentStateSummary?.interactionStats.failureCount ?? 0)}
+              </div>
+              <div className="text-[10px] font-bold text-white/60">成功裁决</div>
+            </div>
+          </div>
+          <div className="mt-3 flex gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden">
+            {(studentStateSummary?.recentPainPoints?.length
+              ? studentStateSummary.recentPainPoints.slice(0, 3)
+              : ['等待状态积累']).map((item) => (
+              <span
+                key={item}
+                className="whitespace-nowrap rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-bold text-white/85"
+              >
+                {item}
+              </span>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-4 gap-2 mb-5">
+          <div className="game-card p-3 text-center">
+            <div className="text-2xl font-display font-bold text-[#1a1a2e]">{errorStats.total}</div>
+            <div className="text-[10px] font-bold text-gray-500 mt-1">总错题</div>
+          </div>
+          <div className="game-card p-3 text-center" style={{ backgroundColor: SUBJECT_META.zh.light }}>
+            <div className="text-2xl font-display font-bold" style={{ color: SUBJECT_META.zh.color }}>{errorStats.zh}</div>
+            <div className="text-[10px] font-bold text-gray-500 mt-1">语文</div>
+          </div>
+          <div className="game-card p-3 text-center" style={{ backgroundColor: SUBJECT_META.ma.light }}>
+            <div className="text-2xl font-display font-bold" style={{ color: SUBJECT_META.ma.color }}>{errorStats.ma}</div>
+            <div className="text-[10px] font-bold text-gray-500 mt-1">数学</div>
+          </div>
+          <div className="game-card p-3 text-center" style={{ backgroundColor: SUBJECT_META.en.light }}>
+            <div className="text-2xl font-display font-bold" style={{ color: SUBJECT_META.en.color }}>{errorStats.en}</div>
+            <div className="text-[10px] font-bold text-gray-500 mt-1">英语</div>
+          </div>
+        </div>
+
+        <div className="flex gap-2 mb-6 overflow-x-auto [&::-webkit-scrollbar]:hidden">
+          {([
+            ['all', '全部'],
+            ['zh', '语文'],
+            ['ma', '数学'],
+            ['en', '英语'],
+          ] as [ErrorFilter, string][]).map(([value, label]) => (
+            <button
+              key={value}
+              onClick={() => setErrorFilter(value)}
+              className={`px-4 py-2 rounded-xl border-2 font-bold text-sm whitespace-nowrap ${errorFilter === value ? 'bg-[#1a1a2e] text-white border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e]' : 'bg-white text-gray-500 border-gray-200'}`}
+            >
+              {label}
+            </button>
+          ))}
         </div>
 
         <div className="space-y-4">
-          {errorList.length === 0 ? (
-             <div className="text-center text-gray-400 mt-10 font-bold border-2 border-gray-200 border-dashed rounded-xl p-8">
-               太棒了，目前没有待复活的知识点！
-             </div>
+          {filteredErrors.length === 0 ? (
+            <div className="text-center text-gray-400 mt-10 font-bold border-2 border-gray-200 border-dashed rounded-xl p-8">
+              当前筛选下没有待修复错题，继续保持这条线的稳定输出。
+            </div>
           ) : (
-             errorList.map((err, idx) => (
-               <div key={err.id || idx} className="game-card p-4 relative flex flex-col border-l-8 border-l-[var(--color-subj-en)]">
-                 <div className="flex justify-between items-start mb-2">
-                   <span className="text-[var(--color-subj-en)] font-bold text-sm line-clamp-1">{err.painPoint || '综合测试'}</span>
-                   <span className="text-xs font-bold bg-[#1a1a2e] text-white px-2 py-1 rounded whitespace-nowrap">待复活</span>
-                 </div>
-                 <h4 className="font-bold text-lg mb-2 text-[#1a1a2e] line-clamp-2">{err.rule || err.questionText?.substring(0, 30)}</h4>
-                 <div className="flex gap-2 mb-4 overflow-x-auto [&::-webkit-scrollbar]:hidden">
-                   <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded border border-gray-200 whitespace-nowrap">近期错题</span>
-                   <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded border border-gray-200 whitespace-nowrap">高频重灾区</span>
-                 </div>
+            filteredErrors.map((err, idx) => {
+              const { subject, node } = getErrorMeta(err);
+              const meta = SUBJECT_META[subject];
+              const isRecommended = Boolean(recommendedErrorId && err.id === recommendedErrorId);
+
+              return (
+                <div
+                  key={err.id || idx}
+                  className="game-card p-4 relative flex flex-col"
+                  style={{
+                    borderLeftWidth: 8,
+                    borderLeftColor: meta.color,
+                    boxShadow: isRecommended ? '0 0 0 3px rgba(255,190,11,0.25), 4px 4px 0 rgba(26,26,46,0.18)' : undefined,
+                  }}
+                >
+                  {isRecommended && (
+                    <div className="absolute right-3 top-3 rounded-full bg-[var(--color-secondary)] px-3 py-1 text-[10px] font-black text-[#1a1a2e] border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e]">
+                      AI 当前主线
+                    </div>
+                  )}
+                  <div className="flex justify-between items-start gap-3 mb-2">
+                    <div>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs font-bold px-2 py-1 rounded border-2 border-[#1a1a2e]" style={{ backgroundColor: meta.color, color: subject === 'en' ? '#1a1a2e' : '#fff' }}>
+                          {meta.name}
+                        </span>
+                        <span className="text-[11px] font-bold bg-gray-100 text-gray-500 px-2 py-1 rounded border border-gray-200">
+                          {getErrorRecencyLabel(idx)}
+                        </span>
+                      </div>
+                      <h4 className="font-bold text-lg text-[#1a1a2e] line-clamp-2">{node}</h4>
+                    </div>
+                    <span className="text-xs font-bold bg-[#1a1a2e] text-white px-2 py-1 rounded whitespace-nowrap">待复活</span>
+                  </div>
+
+                  <p className="text-sm text-gray-600 font-medium leading-relaxed mb-3">
+                    {err.rule || err.painPoint || err.questionText?.substring(0, 60)}
+                  </p>
+
+                  <div className="flex gap-2 mb-4 overflow-x-auto [&::-webkit-scrollbar]:hidden">
+                    <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded border border-gray-200 whitespace-nowrap">{meta.short}薄弱点</span>
+                    <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded border border-gray-200 whitespace-nowrap">点击可重做</span>
+                    <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded border border-gray-200 whitespace-nowrap">{node}</span>
+                    {isRecommended && (
+                      <span className="bg-[var(--color-secondary)]/20 text-[#1a1a2e] text-xs font-bold px-2 py-1 rounded border-2 border-[#1a1a2e] whitespace-nowrap">长期状态推荐</span>
+                    )}
+                  </div>
                  
-                 <div className="flex gap-2 mt-auto">
-                   <button 
-                     onClick={() => generateCloneQuestion(err)}
-                     className="game-btn bg-gray-200 text-gray-600 flex-1 py-3 text-sm flex justify-center items-center gap-1 border-0"
-                   >
-                     文本题
-                   </button>
-                   <button 
-                     onClick={() => generateTheaterScript(err)}
-                     className="game-btn bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white flex-[2] py-3 text-sm flex justify-center items-center gap-2 border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e] animate-pulse"
-                   >
-                     ✨ 次元剧场：沉浸式重构
-                   </button>
-                 </div>
-               </div>
-             ))
+                  <div className="grid grid-cols-3 gap-2 mt-auto">
+                    <button 
+                      onClick={() => startContinuousPractice(filteredErrors, idx)}
+                      className="game-btn bg-gray-200 text-gray-700 py-3 text-sm flex justify-center items-center gap-1 border-0"
+                    >
+                      连续练习
+                    </button>
+                    <button 
+                      onClick={() => {
+                        setPracticeQueue([]);
+                        setPracticeIndex(0);
+                        generateTheaterScript(err);
+                      }}
+                      className="game-btn bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white py-3 text-sm flex justify-center items-center gap-2 border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e]"
+                    >
+                      剧场重构
+                    </button>
+                    <button
+                      onClick={async () => {
+                        if (demoMode) {
+                          setErrorList((current) => current.filter((item) => item.id !== err.id));
+                        } else {
+                          if (!user || !err.id) return;
+                          await resolveError(user.uid, err.id);
+                        }
+                        await markTaskComplete('error-revive');
+                        await markTaskComplete('stability-round');
+                        if (!demoMode) {
+                          await loadErrors();
+                        }
+                      }}
+                      className="game-btn bg-[var(--color-accent-green)] text-[#1a1a2e] py-3 text-sm flex justify-center items-center gap-1 border-0"
+                    >
+                      已掌握
+                    </button>
+                  </div>
+                </div>
+              );
+            })
           )}
         </div>
       </div>
@@ -940,6 +2012,30 @@ export default function App() {
         <div className="flex items-center justify-between border-b border-gray-100 pb-2">
           <span className="font-bold text-[#1a1a2e] text-sm">错题重复失效率</span>
           <span className="text-[var(--color-accent-green)] font-bold text-sm">↓ 12% (稳步下降)</span>
+        </div>
+      </div>
+
+      <h3 className="font-bold text-lg mb-3 mt-6">体验偏好</h3>
+      <div className="game-card p-4 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="font-bold text-[#1a1a2e] text-sm">剧场分支 Cue 音效</p>
+            <p className="text-xs text-gray-500 leading-relaxed mt-1">
+              控制分支视频 ready 时的短音效提示。视觉切换会始终保留。
+            </p>
+          </div>
+          <button
+            type="button"
+            onClick={() => { void toggleTheaterCueEnabled(); }}
+            className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-mono border transition ${
+              theaterCueEnabled
+                ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]'
+                : 'bg-gray-100 text-gray-500 border-gray-200'
+            }`}
+          >
+            {theaterCueEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
+            {theaterCueEnabled ? '已开启' : '已静音'}
+          </button>
         </div>
       </div>
     </motion.div>
@@ -987,10 +2083,19 @@ export default function App() {
         <div className="p-4 border-b-2 border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className={`w-3 h-3 rounded-full ${isAiContent ? 'bg-[var(--color-secondary)]' : 'bg-[var(--color-subj-ma)]'}`}></div>
-            <span className="font-bold text-sm">{isAiContent ? 'AI 多模态动态推演' : '极光数学 · 几何辅助线'}</span>
+            <span className="font-bold text-sm">
+              {practiceQueue.length > 1
+                ? `连续练习 ${practiceIndex + 1}/${practiceQueue.length}`
+                : isAiContent
+                  ? 'AI 多模态动态推演'
+                  : '极光数学 · 几何辅助线'}
+            </span>
           </div>
           <div className="bg-gray-100 rounded-full h-2 w-24 overflow-hidden border border-gray-300">
-            <div className="bg-[var(--color-primary)] w-1/2 h-full"></div>
+            <div
+              className="bg-[var(--color-primary)] h-full transition-all"
+              style={{ width: `${practiceQueue.length > 1 ? ((practiceIndex + 1) / practiceQueue.length) * 100 : 50}%` }}
+            ></div>
           </div>
         </div>
 
@@ -1147,7 +2252,8 @@ export default function App() {
         <div className="fixed bottom-0 left-0 right-0 p-4 bg-[#1a1a2e]/90 backdrop-blur pb-safe text-center w-full max-w-md mx-auto z-50 border-t border-white/10">
           <p className="text-[var(--color-secondary)] font-bold mb-3">为你的青春挽回了 {savedMins} 分钟</p>
           <button 
-            onClick={() => {
+            onClick={async () => {
+              await markTaskComplete('dehydrate-homework');
               setCurrentScreen('dashboard');
               setDehydrateMode('idle');
               setDehydrateData(null);
@@ -1211,6 +2317,8 @@ export default function App() {
                 onClick={async () => {
                    if (isAiContent && user) {
                      await saveErrorRecord(user.uid, aiData);
+                   } else if (isAiContent && demoMode) {
+                     setErrorList((current) => [{ ...aiData, id: `demo-added-${Date.now()}`, status: 'active' }, ...current]);
                    }
                    setCurrentScreen('combat');
                    setCombatAnswer('');
@@ -1257,17 +2365,33 @@ export default function App() {
             onClick={async () => {
                // Award points and save
                handleTimeSavedUpdate(15);
-               if (isAiContent && (aiData as any)._errorId && user) {
-                 await resolveError(user.uid, (aiData as any)._errorId);
+               if (isAiContent && (aiData as any)._errorId) {
+                 if (user) {
+                   await resolveError(user.uid, (aiData as any)._errorId);
+                   await loadErrors();
+                 } else if (demoMode) {
+                   setErrorList((current) => current.filter((item) => item.id !== (aiData as any)._errorId));
+                 }
+                 await markTaskComplete('error-revive');
+                 await markTaskComplete('stability-round');
+               }
+               if (practiceQueue.length > 1 && practiceIndex < practiceQueue.length - 1) {
+                 const nextIndex = practiceIndex + 1;
+                 setPracticeIndex(nextIndex);
+                 setCombatAnswer('');
+                 await generateCloneQuestion(practiceQueue[nextIndex]);
+                 return;
                }
                setCurrentScreen('report');
                setAiMode('idle');
                setAiData(null);
                setCombatAnswer('');
+               setPracticeQueue([]);
+               setPracticeIndex(0);
             }}
             className="game-btn bg-white text-[#1a1a2e] flex-1 py-4 text-lg"
           >
-            收下战利品
+            {practiceQueue.length > 1 && practiceIndex < practiceQueue.length - 1 ? '进入下一题' : '收下战利品'}
           </button>
         </div>
       </motion.div>
@@ -1294,12 +2418,34 @@ export default function App() {
             <h2 className="font-display font-black text-2xl tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 to-purple-600 mb-4">MÖBIUS ENGINE INITIALIZING</h2>
             <p className="text-gray-400 font-mono text-xs">Generating Seedance 2.0 Dynamic Video Stream...</p>
             <p className="text-gray-500 font-mono text-[10px] mt-2">Compiling cognitive state... [Frustration: {cogState.frustration}, Focus: {cogState.focus}]</p>
+            {theaterMeta && (
+              <p className="text-gray-500 font-mono text-[10px] mt-2">
+                Source: {theaterMeta.source} {theaterMeta.provider ? `// Provider: ${theaterMeta.provider}` : ''}
+              </p>
+            )}
           </div>
         </motion.div>
       );
     }
 
     if (!theaterScript) return null;
+
+    const displayVideoUrl = theaterMeta?.activeVideoUrl;
+    const hasReadyVideo = Boolean(
+      theaterMeta?.source === 'mobius' &&
+      displayVideoUrl,
+    );
+    const isVideoPending = Boolean(
+      theaterMeta?.source === 'mobius' &&
+      theaterMeta?.videoStatus &&
+      ['queued', 'processing'].includes(theaterMeta.videoStatus),
+    );
+    const isBranchTransitionPending = Boolean(
+      theaterMode === 'resolution' &&
+      theaterMeta?.source === 'mobius' &&
+      theaterMeta?.branchOutcome &&
+      isVideoPending,
+    );
 
     return (
       <motion.div 
@@ -1309,41 +2455,257 @@ export default function App() {
         exit={{ opacity: 0 }}
         className="absolute inset-0 w-full h-full flex flex-col bg-black overflow-hidden font-sans"
       >
-        {/* Mocking a Manga / Anime Frame */}
         <div className="flex-1 relative overflow-hidden flex flex-col items-center justify-center">
+          <div className={`absolute inset-0 z-0 ${hasReadyVideo ? 'bg-black' : 'bg-gradient-to-b from-indigo-900/40 to-black'}`}></div>
+          <div className="absolute top-5 right-5 z-40">
+            <button
+              type="button"
+              onClick={() => { void toggleTheaterCueEnabled(); }}
+              className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/55 px-3 py-2 text-[11px] font-mono text-white backdrop-blur-sm transition hover:border-cyan-300/60 hover:text-cyan-100"
+            >
+              {theaterCueEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
+              <span>{theaterCueEnabled ? 'Cue Sound On' : 'Cue Sound Off'}</span>
+            </button>
+          </div>
           
-          <div className="absolute inset-0 bg-gradient-to-b from-indigo-900/40 to-black z-0"></div>
-          
-          {/* Manga Panel Border */}
           <div className="relative z-10 w-[95%] h-[90%] border-4 border-white/20 p-2 transform rotate-1">
             <div className="w-full h-full border-4 border-white overflow-hidden relative bg-[#111]">
+               {hasReadyVideo && (
+                 <>
+                   <video
+                     key={displayVideoUrl}
+                     src={displayVideoUrl}
+                     className="absolute inset-0 w-full h-full object-cover"
+                     autoPlay
+                     muted
+                     loop
+                     playsInline
+                     controls
+                     onError={() => {
+                       setTheaterMeta((current) => current ? {
+                         ...current,
+                         videoStatus: 'failed',
+                         errorMessage: '视频播放失败，已自动回退到文本剧场。',
+                       } : current);
+                     }}
+                   />
+                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent z-10"></div>
+                 </>
+               )}
+               <AnimatePresence>
+                 {theaterCutFxActive && (
+                   <motion.div
+                     key="branch-cut-fx"
+                     initial={{ opacity: 0 }}
+                     animate={{ opacity: 1 }}
+                     exit={{ opacity: 0 }}
+                     transition={{ duration: 0.14 }}
+                     className="absolute inset-0 z-30 pointer-events-none overflow-hidden"
+                   >
+                     <div className="absolute inset-0 bg-white/85 mix-blend-screen" />
+                     <div className="absolute inset-0 bg-gradient-to-b from-cyan-300/70 via-fuchsia-500/25 to-transparent" />
+                     <motion.div
+                       initial={{ x: '-100%' }}
+                       animate={{ x: '100%' }}
+                       transition={{ duration: 0.24, ease: 'easeInOut' }}
+                       className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-cyan-200/90 to-transparent blur-md"
+                     />
+                     <motion.div
+                       initial={{ opacity: 0 }}
+                       animate={{ opacity: [0, 1, 0.35] }}
+                       transition={{ duration: 0.24 }}
+                       className="absolute inset-0"
+                       style={{
+                         backgroundImage:
+                           'repeating-linear-gradient(180deg, rgba(255,255,255,0.18) 0px, rgba(255,255,255,0.18) 2px, transparent 2px, transparent 7px)',
+                       }}
+                     />
+                   </motion.div>
+                 )}
+               </AnimatePresence>
                
-               {/* Scene Content */}
                <motion.div 
                  initial={{ y: 50, opacity: 0 }}
                  animate={{ y: 0, opacity: 1 }}
-                 className="absolute inset-0 flex items-center justify-center p-8 text-center"
+                 className={`absolute inset-0 ${hasReadyVideo ? 'z-20' : ''} flex items-center justify-center p-8 text-center`}
                >
                  {theaterMode === 'playing' && (
                    <div className="space-y-6">
-                     <p className="text-2xl font-bold italic text-white drop-shadow-lg leading-relaxed">
+                     <p className={`font-bold italic text-white drop-shadow-lg leading-relaxed ${hasReadyVideo ? 'text-xl md:text-2xl max-w-md mx-auto bg-black/45 backdrop-blur-sm p-4 rounded-2xl border border-white/15' : 'text-2xl'}`}>
                        "{theaterScript.sceneIntro}"
                      </p>
                      <p className="text-fuchsia-400 font-mono text-sm">[ E.M.A Companion Status: <span className="uppercase">{theaterScript.emotion}</span> ]</p>
+                     {theaterMeta && (
+                       <div className={`text-[11px] font-mono space-y-1 ${hasReadyVideo ? 'text-gray-200' : 'text-gray-400'}`}>
+                         <p>[ Source: {theaterMeta.source.toUpperCase()} ]</p>
+                         {theaterMeta.provider && <p>[ Video Provider: {theaterMeta.provider.toUpperCase()} ]</p>}
+                         {theaterMeta.providerJobId && <p>[ Provider Job ID: {theaterMeta.providerJobId} ]</p>}
+                         {theaterMeta.videoStatus && <p>[ Video Status: {theaterMeta.videoStatus.toUpperCase()} ]</p>}
+                         {theaterMeta.contentKnowledgePointTitle && (
+                           <p>[ Knowledge Point: {theaterMeta.contentKnowledgePointTitle} {theaterMeta.contentKnowledgePointGrade ? `// ${theaterMeta.contentKnowledgePointGrade}` : ''} ]</p>
+                         )}
+                        {theaterMeta.relatedQuestionSummary?.length ? (
+                          <p>[ Similar Questions: {theaterMeta.relatedQuestionSummary.join(' | ')} ]</p>
+                        ) : null}
+                        {theaterMeta.knowledgeActionLabel && (
+                          <p>[ Knowledge Action: {theaterMeta.knowledgeActionLabel}{theaterMeta.knowledgeActionType ? ` // ${theaterMeta.knowledgeActionType}` : ''} ]</p>
+                        )}
+                        {theaterMeta.diagnosedMistakeLabels?.length ? (
+                          <p>[ Diagnosed Mistakes: {theaterMeta.diagnosedMistakeLabels.join(' | ')} ]</p>
+                        ) : null}
+                        {theaterMeta.errorMessage && <p>[ Note: {theaterMeta.errorMessage} ]</p>}
+                       </div>
+                     )}
+                     {hasReadyVideo && (
+                       <p className="text-xs text-cyan-200 font-mono">
+                         视频已就绪，当前为真实播放态。
+                       </p>
+                     )}
                    </div>
                  )}
                  {theaterMode === 'interaction' && (
-                   <div className="space-y-8 bg-black/80 p-8 rounded-3xl border border-fuchsia-500/50 backdrop-blur-sm">
+                    <div className="space-y-8 bg-black/80 p-8 rounded-3xl border border-fuchsia-500/50 backdrop-blur-sm">
                      <p className="text-2xl font-bold text-fuchsia-400 drop-shadow-[0_0_10px_rgba(232,121,249,0.8)] animate-pulse">
                        AWAITING YOUR OVERRIDE:
                      </p>
                      <p className="text-xl text-white font-medium">"{theaterScript.interactionPrompt}"</p>
-                     
+                     {theaterMeta?.videoUrl && (
+                       <p className="text-xs text-gray-400 font-mono break-all">
+                         Preview Asset: {theaterMeta.videoUrl}
+                       </p>
+                     )}
+                     {isVideoPending && (
+                       <p className="text-xs text-cyan-300 font-mono">
+                         视频仍在生成中，前端正自动轮询最新状态...
+                       </p>
+                     )}
+                     {hasReadyVideo && (
+                       <p className="text-xs text-cyan-300 font-mono">
+                         视频已切入真实播放，你现在看到的是生成结果上的交互叠层。
+                       </p>
+                     )}
+                     <div className="max-w-md mx-auto rounded-2xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-4 text-left space-y-3">
+                       <p className="text-xs text-cyan-200 font-mono">JUDGE INPUT // STRUCTURED ACTION SUBMISSION</p>
+                       <div className="flex items-center justify-between gap-4">
+                         <span className="text-sm text-white font-medium">我完成了这个知识动作</span>
+                         <button
+                           type="button"
+                           onClick={() => setTheaterActionCompleted((value) => !value)}
+                           className={`game-btn px-4 py-2 text-sm ${theaterActionCompleted ? 'bg-emerald-400 text-[#1a1a2e]' : 'bg-transparent border-2 border-gray-500 text-gray-300'}`}
+                         >
+                           {theaterActionCompleted ? '已完成' : '未完成'}
+                         </button>
+                       </div>
+                       <div>
+                         <p className="text-xs text-gray-300 font-mono mb-2">SELF CHECK</p>
+                         <div className="flex flex-wrap gap-2">
+                           {[
+                             { key: 'aligned', label: '完全对齐' },
+                             { key: 'partial', label: '部分命中' },
+                             { key: 'guess', label: '更像猜测' },
+                           ].map((item) => (
+                             <button
+                               key={item.key}
+                               type="button"
+                               onClick={() => setTheaterSelfCheck(item.key as 'aligned' | 'partial' | 'guess')}
+                               className={`game-btn px-3 py-2 text-xs ${theaterSelfCheck === item.key ? 'bg-cyan-300 text-[#1a1a2e]' : 'bg-transparent border-2 border-gray-500 text-gray-300'}`}
+                             >
+                               {item.label}
+                             </button>
+                           ))}
+                         </div>
+                       </div>
+                       <div>
+                         <p className="text-xs text-gray-300 font-mono mb-2">CONFIDENCE</p>
+                         <div className="flex flex-wrap gap-2">
+                           {[
+                             { key: 'low', label: '低' },
+                             { key: 'medium', label: '中' },
+                             { key: 'high', label: '高' },
+                           ].map((item) => (
+                             <button
+                               key={item.key}
+                               type="button"
+                               onClick={() => setTheaterConfidence(item.key as InteractionConfidence)}
+                               className={`game-btn px-3 py-2 text-xs ${theaterConfidence === item.key ? 'bg-amber-300 text-[#1a1a2e]' : 'bg-transparent border-2 border-gray-500 text-gray-300'}`}
+                             >
+                               {item.label}
+                             </button>
+                           ))}
+                         </div>
+                       </div>
+                       <div>
+                         <p className="text-xs text-gray-300 font-mono mb-2">ACTION PANEL // {theaterMeta?.knowledgeActionType?.toUpperCase() ?? 'GENERIC'}</p>
+                         {(theaterMeta?.knowledgeActionType ?? 'select') === 'select' && (
+                           <div className="grid gap-2">
+                             {SELECT_ACTION_OPTIONS.map((item) => (
+                               <button
+                                 key={item.id}
+                                 type="button"
+                                 onClick={() => setTheaterSelectedOption(item.id)}
+                                 className={`game-btn px-3 py-3 text-sm text-left ${
+                                   theaterSelectedOption === item.id
+                                     ? 'bg-fuchsia-300 text-[#1a1a2e]'
+                                     : 'bg-transparent border-2 border-gray-500 text-gray-200'
+                                 }`}
+                               >
+                                 {item.label}
+                               </button>
+                             ))}
+                           </div>
+                         )}
+                         {theaterMeta?.knowledgeActionType === 'sequence' && (
+                           <div className="space-y-2">
+                             {theaterSequence.map((step, index) => (
+                               <button
+                                 key={`${step}-${index}`}
+                                 type="button"
+                                 onClick={() => rotateSequenceStep(index)}
+                                 className="game-btn w-full px-3 py-3 text-sm text-left bg-transparent border-2 border-gray-500 text-gray-200"
+                               >
+                                 Step {index + 1}: {step}
+                               </button>
+                             ))}
+                             <p className="text-[11px] text-cyan-100 font-mono">点击步骤可与下一步交换顺序，排出你认为正确的动作链。</p>
+                           </div>
+                         )}
+                         {(theaterMeta?.knowledgeActionType === 'draw' || theaterMeta?.knowledgeActionType === 'drag') && (
+                           <div className="space-y-2">
+                             <div className="grid grid-cols-1 gap-2">
+                               {DRAW_ACTION_CHECKPOINTS.map((checkpoint) => (
+                                 <button
+                                   key={checkpoint}
+                                   type="button"
+                                   onClick={() => toggleDrawCheckpoint(checkpoint)}
+                                   className={`game-btn px-3 py-3 text-sm text-left ${
+                                     theaterDrawCheckpoints.includes(checkpoint)
+                                       ? 'bg-cyan-300 text-[#1a1a2e]'
+                                       : 'bg-transparent border-2 border-gray-500 text-gray-200'
+                                   }`}
+                                 >
+                                   {theaterDrawCheckpoints.includes(checkpoint) ? '[ Locked ]' : '[ Tap ]'} {checkpoint}
+                                 </button>
+                               ))}
+                             </div>
+                             <p className="text-[11px] text-cyan-100 font-mono">用“点亮关键节点”的方式模拟描线/拖拽路径。</p>
+                           </div>
+                         )}
+                       </div>
+                     </div>
+
                      <div className="flex flex-col gap-4 pt-4">
-                       <button onClick={() => { setTheaterResolution('success'); setTheaterMode('resolution'); }} className="game-btn bg-fuchsia-600 text-white py-4 border-2 border-white shadow-[4px_4px_0_#fff]">
-                         [ Execute Rule ] // Success
+                       <button
+                         disabled={theaterDecisionPending}
+                         onClick={() => { handleTheaterResolution(); }}
+                         className="game-btn bg-fuchsia-600 text-white py-4 border-2 border-white shadow-[4px_4px_0_#fff]"
+                       >
+                         {theaterDecisionPending ? '[ Resolving ]' : '[ Submit Action ] // Judge via Mobius'}
                        </button>
-                       <button onClick={() => { setTheaterResolution('failure'); setTheaterMode('resolution'); }} className="game-btn bg-transparent border-2 border-gray-600 text-gray-400 py-3">
+                       <button
+                         disabled={theaterDecisionPending}
+                         onClick={() => { handleTheaterResolution('failure'); }}
+                         className="game-btn bg-transparent border-2 border-gray-600 text-gray-400 py-3"
+                       >
                          [ Ignore Rule ] // Fail
                        </button>
                      </div>
@@ -1351,12 +2713,89 @@ export default function App() {
                  )}
                  {theaterMode === 'resolution' && (
                    <div className="space-y-6">
-                     <p className={`text-3xl font-black italic ${theaterResolution === 'success' ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-pink)]'}`}>
-                       {theaterResolution === 'success' ? 'MISSION ACCOMPLISHED' : 'SYSTEM COLLAPSE'}
-                     </p>
-                     <p className="text-xl text-white font-bold leading-relaxed">
-                       {theaterResolution === 'success' ? theaterScript.successScene : theaterScript.failureScene}
-                     </p>
+                    <p className={`text-3xl font-black italic ${theaterResolution === 'success' ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-pink)]'}`}>
+                      {theaterMeta?.resolutionTitle ?? (theaterResolution === 'success' ? 'MISSION ACCOMPLISHED' : 'SYSTEM COLLAPSE')}
+                    </p>
+                    <p className="text-xl text-white font-bold leading-relaxed">
+                      {theaterResolution === 'success' ? theaterScript.successScene : theaterScript.failureScene}
+                    </p>
+                    {theaterMeta?.source === 'mobius' && theaterMeta?.branchOutcome && (
+                      <p className="text-xs text-cyan-300 font-mono">
+                        Branch video: {theaterMeta.branchOutcome.toUpperCase()} // {theaterMeta.videoStatus?.toUpperCase() ?? 'UNKNOWN'}
+                      </p>
+                    )}
+                    {isBranchTransitionPending && (
+                      <div className="max-w-md mx-auto rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-3 text-left">
+                        <p className="text-sm font-mono text-cyan-200">
+                          正在切入 {theaterMeta?.branchOutcome === 'success' ? 'SUCCESS' : 'FAILURE'} 分支片段...
+                        </p>
+                        <p className="mt-2 text-xs font-mono text-cyan-100/90">
+                          当前继续保持上一段已就绪视频播放，分支素材 ready 后会自动无缝切换。
+                        </p>
+                      </div>
+                    )}
+                    {theaterMeta?.source === 'mobius' && theaterMeta?.branchOutcome && theaterMeta?.videoStatus === 'ready' && (
+                      <p className="text-xs text-emerald-300 font-mono">
+                        {theaterMeta.branchOutcome.toUpperCase()} 分支片段已切入播放。
+                      </p>
+                    )}
+                    {theaterCutFxActive && (
+                      <p className="text-xs text-fuchsia-200 font-mono tracking-[0.25em]">
+                        WORLDLINE SHIFT DETECTED
+                      </p>
+                    )}
+                    {theaterReadyCueActive && (
+                      <motion.p
+                        initial={{ opacity: 0.4, scale: 0.96 }}
+                        animate={{ opacity: [0.4, 1, 0.65], scale: [0.96, 1.02, 1] }}
+                        transition={{ duration: 0.45 }}
+                        className="text-xs text-cyan-100 font-mono tracking-[0.22em]"
+                      >
+                        SYNC CUE // BRANCH LOCK ACQUIRED
+                      </motion.p>
+                    )}
+                    {!theaterCueEnabled && (
+                      <p className="text-[11px] text-gray-400 font-mono">
+                        Cue sound muted for this theater session.
+                      </p>
+                    )}
+                    {theaterMeta?.coachMessage && (
+                      <p className="text-sm text-cyan-200 font-mono max-w-md mx-auto">
+                        {theaterMeta.coachMessage}
+                       </p>
+                     )}
+                    {theaterMeta?.adjudicationRationale?.length ? (
+                      <div className="max-w-md mx-auto rounded-2xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-3 text-left">
+                        <p className="text-xs text-cyan-200 font-mono">ADJUDICATION RATIONALE</p>
+                        <div className="mt-2 space-y-1 text-[11px] text-gray-200 font-mono">
+                          {theaterMeta.adjudicationRationale.map((item) => (
+                            <p key={item}>[{item}]</p>
+                          ))}
+                        </div>
+                      </div>
+                    ) : null}
+                    {theaterMeta?.contentKnowledgePointTitle && (
+                      <div className="max-w-md mx-auto rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left">
+                        <p className="text-xs text-amber-200 font-mono">
+                          内容底座已锁定知识点：{theaterMeta.contentKnowledgePointTitle}
+                          {theaterMeta.contentKnowledgePointGrade ? ` // ${theaterMeta.contentKnowledgePointGrade}` : ''}
+                        </p>
+                        {theaterMeta.contentEvidence?.length ? (
+                          <div className="mt-2 space-y-1 text-[11px] text-gray-300 font-mono">
+                            {theaterMeta.contentEvidence.map((item) => (
+                              <p key={item}>[{item}]</p>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
+                     {theaterMeta?.nextActions?.length ? (
+                       <div className="text-xs text-gray-300 font-mono max-w-md mx-auto space-y-1">
+                         {theaterMeta.nextActions.map((item) => (
+                           <p key={item}>[{item}]</p>
+                         ))}
+                       </div>
+                     ) : null}
                      <button onClick={() => setCurrentScreen('dashboard')} className="mt-12 game-btn bg-white text-black py-3 px-8 text-lg hover:bg-gray-200">
                        Exit Simulation
                      </button>
@@ -1404,7 +2843,7 @@ export default function App() {
             </div>
             
             <div className="text-xs text-gray-500 mt-2 italic flex justify-center items-center gap-1">
-               <Lock size={12} /> Powered by FreeScore AI
+               <Lock size={12} /> Powered by 列子御风 AI
             </div>
           </div>
           

@@ -74,7 +74,7 @@ service cloud.firestore {
         && isValidUserUpdate(incoming())
         && incoming().createdAt == existing().createdAt
         && (
-          incoming().diff(existing()).affectedKeys().hasOnly(['targetScore', 'timeSaved', 'grade', 'textbooks', 'updatedAt', 'cognitiveState'])
+          incoming().diff(existing()).affectedKeys().hasOnly(['targetScore', 'timeSaved', 'grade', 'textbooks', 'updatedAt', 'cognitiveState', 'todayTaskStatus', 'taskStatusDate', 'knowledgeProgress'])
         );
       allow delete: if false;
 
