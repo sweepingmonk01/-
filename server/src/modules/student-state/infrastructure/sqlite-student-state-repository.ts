@@ -78,7 +78,7 @@ export class SQLiteStudentStateRepository implements StudentStateRepository {
     const rows = this.db.prepare(`
       SELECT * FROM student_state_snapshots
       WHERE student_id = ?
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT ? OFFSET ?
     `).all(studentId, limit, offset) as unknown as StudentStateSnapshotRow[];
 
@@ -89,7 +89,7 @@ export class SQLiteStudentStateRepository implements StudentStateRepository {
     const row = this.db.prepare(`
       SELECT * FROM student_state_snapshots
       WHERE student_id = ?
-      ORDER BY created_at DESC
+      ORDER BY created_at DESC, rowid DESC
       LIMIT 1
     `).get(studentId) as unknown as StudentStateSnapshotRow | undefined;
 

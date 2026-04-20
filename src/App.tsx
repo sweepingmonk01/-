@@ -40,6 +40,17 @@ const SELECT_ACTION_OPTIONS = [
 
 const SEQUENCE_ACTION_STEPS = ['识别关键条件', '触发核心规则', '确认最终答案'];
 const DRAW_ACTION_CHECKPOINTS = ['锁定关键点', '连接正确路径', '复核动作结果'];
+const WELCOME_OUTCOMES = [
+  { label: '今日主线', value: '3 步拿回最值分', accent: 'text-[var(--color-primary)]' },
+  { label: '长期模型', value: '持续记住痛点与规则', accent: 'text-[var(--color-secondary)]' },
+  { label: '训练方式', value: '先诊断，再脱水，再剧场修复', accent: 'text-[var(--color-accent-green)]' },
+];
+
+const WELCOME_SIGNALS = [
+  { icon: ShieldAlert, title: '长期学生状态', detail: '把最近裁决、风险型和高频痛点持续沉淀，不再每次从零开始。', tone: 'bg-[rgba(255,138,61,0.14)] text-[var(--color-secondary)]' },
+  { icon: Target, title: '今日最短提分路径', detail: '首页任务直接跟着 state-summary 和错题主线走，先干最值的那一题。', tone: 'bg-[rgba(61,123,255,0.14)] text-[var(--color-primary)]' },
+  { icon: BookOpen, title: '练习不是堆量', detail: '错题、知识图谱、剧场分支会互相回流，让每次交互都留下可用证据。', tone: 'bg-[rgba(51,209,160,0.14)] text-[var(--color-accent-green)]' },
+];
 
 interface TheaterMeta {
   source: 'mobius' | 'gemini';
@@ -1184,60 +1195,154 @@ export default function App() {
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -20 }}
-      className="absolute inset-0 w-full h-full flex flex-col p-6 pb-12 items-center justify-center text-center overflow-hidden"
+      className="absolute inset-0 w-full h-full overflow-y-auto welcome-aurora"
     >
-      <div className="absolute top-10 left-10 text-[var(--color-primary)] opacity-20"><Zap size={64} /></div>
-      <div className="absolute bottom-40 right-10 text-[var(--color-secondary)] opacity-20"><SparkleIcon size={80} /></div>
-      
-      <div className="flex-1 flex flex-col justify-center items-center w-full max-w-md mx-auto z-10">
-        <motion.div 
-          animate={{ rotate: [0, -5, 5, 0] }}
-          transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
-          className="bg-white border-4 border-[#1a1a2e] rounded-full w-24 h-24 flex items-center justify-center mb-8 shadow-[4px_4px_0_#1a1a2e]"
-        >
-          <img src="https://api.dicebear.com/7.x/bottts/svg?seed=liezi-yufeng" alt="列子御风 AI 伙伴" className="w-16 h-16" />
-        </motion.div>
-        
-        <h1 className="text-4xl font-display font-bold leading-tight mb-4 text-[#1a1a2e]">
-          今天先拿回<br/><span className="text-[var(--color-primary)] selection-bg">最值的分。</span>
-        </h1>
-        
-        <p className="text-lg text-gray-600 mb-12 font-medium px-4">
-          系统已为你挑出最短提分路径。完成这 3 项，你就比昨天更自由。
-        </p>
+      <div className="absolute top-12 left-6 text-[var(--color-primary)] opacity-15 sm:left-12"><Zap size={72} /></div>
+      <div className="absolute bottom-32 right-4 text-[var(--color-secondary)] opacity-15 sm:right-10"><SparkleIcon size={96} /></div>
+      <div className="relative z-10 mx-auto flex min-h-full w-full max-w-6xl flex-col justify-center px-4 py-6 sm:px-8 sm:py-8">
+        <div className="desktop-shell-shadow overflow-hidden rounded-[36px] border border-white/70 bg-white/82 backdrop-blur-xl sm:rounded-[44px]">
+          <div className="grid min-h-[calc(100vh-3rem)] grid-cols-1 sm:min-h-0 lg:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
+            <div className="flex flex-col justify-between px-6 pb-8 pt-8 sm:px-10 sm:pb-10 sm:pt-10 lg:px-12 lg:py-12">
+              <div>
+                <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/8 px-4 py-2 text-sm font-bold text-[var(--color-primary)]">
+                  <BrainCircuit size={16} />
+                  长期学生状态已接入首页决策
+                </div>
+                <div className="mb-8 flex items-center gap-4">
+                  <motion.div 
+                    animate={{ rotate: [0, -5, 5, 0] }}
+                    transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
+                    className="flex h-20 w-20 items-center justify-center rounded-[28px] border-4 border-[#1a1a2e] bg-white shadow-[4px_4px_0_#1a1a2e] sm:h-24 sm:w-24"
+                  >
+                    <img src="https://api.dicebear.com/7.x/bottts/svg?seed=liezi-yufeng" alt="列子御风 AI 伙伴" className="h-14 w-14 sm:h-16 sm:w-16" />
+                  </motion.div>
+                  <div className="text-left">
+                    <p className="text-sm font-black uppercase tracking-[0.24em] text-gray-400">Liezi Yufeng</p>
+                    <p className="text-base font-bold text-[#1a1a2e] sm:text-lg">把“刷题”变成可积累的认知修复</p>
+                  </div>
+                </div>
 
-        <button 
-          onClick={async () => {
-            try {
-              let currentUser = user;
-              if (!currentUser) {
-                const res = await loginWithGoogle();
-                currentUser = res.user;
-              }
-              const profile = await getUserProfile(currentUser.uid);
-              if (profile && profile.grade) {
-                setCurrentScreen('dashboard');
-              } else {
-                setCurrentScreen('profile-setup');
-              }
-            } catch (err) {
-              console.error("Login Error:", err);
-            }
-          }}
-          className="game-btn bg-[var(--color-primary)] text-white w-full py-4 text-xl flex items-center justify-center gap-2"
-        >
-          <Play fill="currentColor" size={24} /> {authChecking ? '连接中...' : '建立档案并诊断'}
-        </button>
-        
-        <button className="mt-4 font-bold text-gray-500 flex items-center gap-2 py-2 px-4 hover:bg-gray-200 rounded-full transition-colors">
-          <Clock size={18} /> 看看我省回多少时间
-        </button>
-        <button
-          onClick={enterDemoMode}
-          className="mt-3 font-bold text-[var(--color-primary)] flex items-center gap-2 py-2 px-4 bg-[var(--color-primary)]/10 rounded-full border border-[var(--color-primary)]/20 transition-colors"
-        >
-          <Zap size={18} /> 直接体验 Demo
-        </button>
+                <h1 className="max-w-2xl text-left text-4xl font-display font-bold leading-[1.05] text-[#1a1a2e] sm:text-5xl lg:text-6xl">
+                  今天先拿回
+                  <br />
+                  <span className="text-[var(--color-primary)]">最值的分。</span>
+                </h1>
+
+                <p className="mt-5 max-w-2xl text-left text-base font-medium leading-7 text-gray-600 sm:text-lg">
+                  系统先用长期状态判断你最近最容易失手的规则和痛点，再把首页任务、知识图谱焦点和剧场修复路径全部对齐到同一条主线。
+                </p>
+
+                <div className="mt-8 grid gap-3 sm:grid-cols-3">
+                  {WELCOME_OUTCOMES.map((item) => (
+                    <div key={item.label} className="rounded-[24px] border border-[#1a1a2e]/10 bg-white/80 px-4 py-4 text-left shadow-[0_14px_30px_rgba(61,123,255,0.08)]">
+                      <p className="text-xs font-black uppercase tracking-[0.18em] text-gray-400">{item.label}</p>
+                      <p className={`mt-2 text-base font-black leading-6 ${item.accent}`}>{item.value}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              <div className="mt-10 flex w-full flex-col gap-4 sm:max-w-xl">
+                <button 
+                  onClick={async () => {
+                    try {
+                      let currentUser = user;
+                      if (!currentUser) {
+                        const res = await loginWithGoogle();
+                        currentUser = res.user;
+                      }
+                      const profile = await getUserProfile(currentUser.uid);
+                      if (profile && profile.grade) {
+                        setCurrentScreen('dashboard');
+                      } else {
+                        setCurrentScreen('profile-setup');
+                      }
+                    } catch (err) {
+                      console.error("Login Error:", err);
+                    }
+                  }}
+                  className="game-btn w-full bg-[var(--color-primary)] py-4 text-lg text-white sm:text-xl flex items-center justify-center gap-2"
+                >
+                  <Play fill="currentColor" size={24} /> {authChecking ? '连接中...' : '建立档案并诊断'}
+                </button>
+
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+                  <button
+                    onClick={() => setCurrentScreen('overview')}
+                    className="flex items-center justify-center gap-2 rounded-full border border-[#1a1a2e]/10 bg-white px-5 py-3 font-bold text-gray-600 transition-colors hover:bg-gray-100"
+                  >
+                    <Clock size={18} /> 看看我省回多少时间
+                  </button>
+                  <button
+                    onClick={enterDemoMode}
+                    className="flex items-center justify-center gap-2 rounded-full border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/10 px-5 py-3 font-bold text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/15"
+                  >
+                    <Zap size={18} /> 直接体验 Demo
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <div className="relative border-t border-[#1a1a2e]/8 bg-[linear-gradient(180deg,rgba(31,34,68,0.98),rgba(22,24,48,1))] px-5 py-6 text-white sm:px-8 sm:py-8 lg:border-l lg:border-t-0">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(61,123,255,0.2),transparent_36%),radial-gradient(circle_at_bottom_right,rgba(255,138,61,0.18),transparent_34%)]" />
+              <div className="relative flex h-full flex-col">
+                <div className="mb-5 flex items-center justify-between">
+                  <div>
+                    <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-200/70">Command Preview</p>
+                    <h2 className="mt-2 text-2xl font-black text-white">今天的主线会如何被生成</h2>
+                  </div>
+                  <div className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-bold text-cyan-100">
+                    state-summary online
+                  </div>
+                </div>
+
+                <div className="space-y-3">
+                  {WELCOME_SIGNALS.map(({ icon: Icon, title, detail, tone }) => (
+                    <div key={title} className="rounded-[26px] border border-white/10 bg-white/6 p-4 backdrop-blur-sm">
+                      <div className="flex items-start gap-3">
+                        <div className={`mt-1 flex h-11 w-11 items-center justify-center rounded-2xl ${tone}`}>
+                          <Icon size={20} />
+                        </div>
+                        <div>
+                          <p className="text-base font-black text-white">{title}</p>
+                          <p className="mt-1 text-sm leading-6 text-slate-300">{detail}</p>
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                <div className="mt-5 rounded-[28px] border border-cyan-300/16 bg-black/18 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+                  <div className="mb-4 flex items-center justify-between">
+                    <div>
+                      <p className="text-xs font-black uppercase tracking-[0.22em] text-cyan-200/70">AI 主线预览</p>
+                      <h3 className="mt-2 text-xl font-black">数学 · 几何辅助线</h3>
+                    </div>
+                    <div className="rounded-full bg-[var(--color-secondary)] px-3 py-1 text-xs font-black text-[#1a1a2e]">
+                      今日优先
+                    </div>
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
+                      <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">最近痛点</p>
+                      <p className="mt-2 text-base font-bold text-white">几何中点辅助线选择失误</p>
+                    </div>
+                    <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
+                      <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">系统动作</p>
+                      <p className="mt-2 text-base font-bold text-white">先错题重构，再剧场分支演练</p>
+                    </div>
+                  </div>
+                  <div className="mt-4 flex items-center gap-3 rounded-2xl border border-[var(--color-secondary)]/20 bg-[var(--color-secondary)]/12 p-4">
+                    <Target size={18} className="text-[var(--color-secondary)]" />
+                    <p className="text-sm font-bold leading-6 text-orange-50">
+                      不是多做，而是先做“刚好击中风险型”的那一步。
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       </div>
     </motion.div>
   );
@@ -1622,7 +1727,6 @@ export default function App() {
             onClick={() => fileInputRef.current?.click()}
             className="game-card p-4 text-left bg-[var(--color-secondary)] border-4 border-[#1a1a2e] shadow-[4px_4px_0_#1a1a2e]"
           >
-            <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleUploadQuestion} />
             <div className="flex items-center gap-2 mb-3">
               <div className="bg-white p-2 rounded-full border-2 border-[#1a1a2e]"><Camera size={18} className="text-[#1a1a2e]" /></div>
               <span className="font-display font-bold text-[#1a1a2e]">拍题破局</span>
@@ -1634,7 +1738,6 @@ export default function App() {
             onClick={() => dehydrateInputRef.current?.click()}
             className="game-card p-4 text-left bg-[#1a1a2e] text-white border-4 border-[var(--color-secondary)] shadow-[0_0_15px_var(--color-secondary)]"
           >
-            <input type="file" accept="image/*" ref={dehydrateInputRef} className="hidden" onChange={handleDehydrateHomework} />
             <div className="flex items-center gap-2 mb-3">
               <div className="bg-white/10 p-2 rounded-full border border-white/15"><Zap size={18} className="text-[var(--color-secondary)]" /></div>
               <span className="font-display font-bold text-[var(--color-secondary)]">作业脱水</span>
@@ -1991,7 +2094,7 @@ export default function App() {
       className="absolute inset-0 w-full h-full flex flex-col bg-gray-50 pb-24 p-6 pt-10"
     >
       <h2 className="text-3xl font-display font-bold text-[#1a1a2e] flex items-center gap-2 mb-6">
-        <Trophy className="text-[var(--color-primary)]" /> 家长驾驶舱
+        <Trophy className="text-[var(--color-primary)]" /> 驾驶舱
       </h2>
       <div className="bg-[#1a1a2e] text-white p-6 rounded-[32px] border-4 border-[#1a1a2e] shadow-[4px_4px_0_#1a1a2e] mb-6 relative overflow-hidden">
         <div className="absolute top-4 right-4 opacity-10"><Trophy size={100} /></div>
@@ -2899,8 +3002,10 @@ export default function App() {
 
   return (
     <div className="w-full h-screen bg-[#1a1a2e] flex items-center justify-center font-sans">
+      <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleUploadQuestion} />
+      <input type="file" accept="image/*" ref={dehydrateInputRef} className="hidden" onChange={handleDehydrateHomework} />
       {/* Mobile container constraint for web view */}
-      <div className="w-full h-full max-w-md mx-auto bg-white overflow-hidden relative shadow-2xl sm:rounded-[40px] sm:h-[90vh] sm:border-[8px] sm:border-[#1a1a2e]">
+      <div className={`${currentScreen === 'welcome' ? 'w-full h-full max-w-none bg-transparent overflow-hidden relative' : 'w-full h-full max-w-md mx-auto bg-white overflow-hidden relative shadow-2xl sm:rounded-[40px] sm:h-[90vh] sm:border-[8px] sm:border-[#1a1a2e]'}`}>
         <AnimatePresence mode="wait">
           {currentScreen === 'welcome' && renderWelcome()}
           {currentScreen === 'profile-setup' && renderProfileSetup()}
@@ -2909,6 +3014,7 @@ export default function App() {
           {currentScreen === 'dashboard' && <Dashboard 
              studentId={user?.uid || 'demo-student'} 
              onNavigate={(s) => setCurrentScreen(s as ScreenState)} 
+             onReturnHome={() => { setDemoMode(false); setCurrentScreen('welcome'); }}
              onTriggerUpload={() => fileInputRef.current?.click()}
              onTriggerDehydrate={() => dehydrateInputRef.current?.click()}
           />}
@@ -2923,7 +3029,7 @@ export default function App() {
         </AnimatePresence>
 
         {/* E.M.A Companion Sprite Floating Overlay */}
-        {['dashboard', 'subject-map'].includes(currentScreen) && (
+        {['subject-map'].includes(currentScreen) && (
           <motion.div 
             initial={{ scale: 0 }}
             animate={{ scale: 1, y: [0, -10, 0] }}
