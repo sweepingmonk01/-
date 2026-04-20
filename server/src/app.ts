@@ -19,7 +19,9 @@ import { MobiusController } from './modules/mobius/presentation/mobius-controlle
 import { StudentStateSummaryService } from './modules/student-state/application/student-state-summary-service.js';
 import { FileStudentStateRepository } from './modules/student-state/infrastructure/file-student-state-repository.js';
 import { SQLiteStudentStateRepository } from './modules/student-state/infrastructure/sqlite-student-state-repository.js';
+import { SQLiteStudentProfileRepository } from './modules/student-state/infrastructure/sqlite-student-profile-repository.js';
 import { StudentStateController } from './modules/student-state/presentation/student-state-controller.js';
+import { StudentProfileController } from './modules/student-state/presentation/student-profile-controller.js';
 import { healthRouter } from './routes/health.js';
 import { createMobiusRouter } from './routes/mobius.js';
 
@@ -73,6 +75,13 @@ export const createMobiusApp = () => {
       repository: studentStates,
     }),
   );
+  
+  // Setup sqlite profile repo regardless of purely file configurations since DB must be resilient
+  const profileRepo = new SQLiteStudentProfileRepository({
+    dbFile: path.resolve(env.sqliteDbFile),
+  });
+  const studentProfileController = new StudentProfileController(profileRepo);
+
   const contentController = new ContentController(
     new ContentOrchestrator({
       catalog: new InMemoryContentCatalog(),
@@ -83,7 +92,7 @@ export const createMobiusApp = () => {
 
   app.use(express.json({ limit: '8mb' }));
 
-  app.get('/', (_req, res) => {
+  app.get('/api', (_req, res) => {
     res.json({
       service: 'liezi-yufeng-mobius',
       status: 'online',
@@ -104,7 +113,7 @@ export const createMobiusApp = () => {
   });
 
   app.use('/api/health', healthRouter);
-  app.use('/api/mobius', createMobiusRouter(controller, contentController, aiController, studentStateController));
+  app.use('/api/mobius', createMobiusRouter(controller, contentController, aiController, studentStateController, studentProfileController));
 
   app.use((error: unknown, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
     console.error('[mobius] unhandled error', error);

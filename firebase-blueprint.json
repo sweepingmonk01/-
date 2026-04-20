@@ -17,18 +17,6 @@
         },
         "targetScore": { "type": "number", "description": "Target score set by user" },
         "timeSaved": { "type": "number", "description": "Total time saved in minutes" },
-        "todayTaskStatus": {
-          "type": "object",
-          "description": "Per-day completion state for generated today-plan tasks"
-        },
-        "taskStatusDate": {
-          "type": "string",
-          "description": "ISO date for the current today-task status snapshot"
-        },
-        "knowledgeProgress": {
-          "type": "object",
-          "description": "Persisted subject map progress grouped by subject and textbook"
-        },
         "cognitiveState": {
           "type": "object",
           "properties": {

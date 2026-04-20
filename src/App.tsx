@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
+import ReactPlayer from 'react-player';
 import { 
   Sword, Map as MapIcon, ShieldAlert, Zap, Clock, 
   Check, ChevronRight, Play, BookOpen, Star, 
@@ -19,6 +20,8 @@ import {
   resolveMobiusInteraction,
 } from './lib/mobius';
 import { onAuthStateChanged } from 'firebase/auth';
+
+import Dashboard from './components/Dashboard';
 
 type ScreenState = 'welcome' | 'profile-setup' | 'diagnostic-loading' | 'target-setter' | 'dashboard' | 'subject-map' | 'error-book' | 'overview' | 'combat' | 'combat-feedback' | 'report' | 'dehydrator' | 'theater';
 
@@ -2082,6 +2085,9 @@ export default function App() {
       >
         <div className="p-4 border-b-2 border-gray-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
+            <button onClick={() => setCurrentScreen('dashboard')} className="mr-2 text-gray-500 hover:text-gray-700 bg-gray-100 p-1.5 rounded-full">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
             <div className={`w-3 h-3 rounded-full ${isAiContent ? 'bg-[var(--color-secondary)]' : 'bg-[var(--color-subj-ma)]'}`}></div>
             <span className="font-bold text-sm">
               {practiceQueue.length > 1
@@ -2173,6 +2179,11 @@ export default function App() {
           exit={{ opacity: 0 }}
           className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-[#1a1a2e] text-white"
         >
+          <div className="absolute top-6 left-6 z-50">
+            <button onClick={() => setCurrentScreen('dashboard')} className="text-gray-400 hover:text-white p-2">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+            </button>
+          </div>
           <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/matrix-stampa.png')] opacity-20 animate-pulse"></div>
           <motion.div
             animate={{ rotate: -360, scale: [1, 1.2, 1] }}
@@ -2457,6 +2468,16 @@ export default function App() {
       >
         <div className="flex-1 relative overflow-hidden flex flex-col items-center justify-center">
           <div className={`absolute inset-0 z-0 ${hasReadyVideo ? 'bg-black' : 'bg-gradient-to-b from-indigo-900/40 to-black'}`}></div>
+          <div className="absolute top-5 left-5 z-40">
+            <button
+              type="button"
+              onClick={() => setCurrentScreen('dashboard')}
+              className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/55 px-3 py-2 text-[11px] font-mono text-white backdrop-blur-sm transition hover:border-cyan-300/60 hover:text-cyan-100"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
+              <span>强制退出 EXIT</span>
+            </button>
+          </div>
           <div className="absolute top-5 right-5 z-40">
             <button
               type="button"
@@ -2472,24 +2493,26 @@ export default function App() {
             <div className="w-full h-full border-4 border-white overflow-hidden relative bg-[#111]">
                {hasReadyVideo && (
                  <>
-                   <video
-                     key={displayVideoUrl}
-                     src={displayVideoUrl}
-                     className="absolute inset-0 w-full h-full object-cover"
-                     autoPlay
-                     muted
-                     loop
-                     playsInline
-                     controls
-                     onError={() => {
+                   {React.createElement(ReactPlayer as any, {
+                     key: displayVideoUrl,
+                     url: displayVideoUrl,
+                     className: "absolute inset-0",
+                     width: "100%",
+                     height: "100%",
+                     playing: true,
+                     muted: true,
+                     loop: true,
+                     playsinline: true,
+                     controls: true,
+                     onError: () => {
                        setTheaterMeta((current) => current ? {
                          ...current,
                          videoStatus: 'failed',
-                         errorMessage: '视频播放失败，已自动回退到文本剧场。',
+                         errorMessage: '视频流化失败，已启动大列表长缓冲池自动回退到极客文本剧场。',
                        } : current);
-                     }}
-                   />
-                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent z-10"></div>
+                     }
+                   })}
+                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent z-10 pointer-events-none"></div>
                  </>
                )}
                <AnimatePresence>
@@ -2883,7 +2906,12 @@ export default function App() {
           {currentScreen === 'profile-setup' && renderProfileSetup()}
           {currentScreen === 'diagnostic-loading' && renderDiagnosticLoading()}
           {currentScreen === 'target-setter' && renderTargetSetter()}
-          {currentScreen === 'dashboard' && renderDashboard()}
+          {currentScreen === 'dashboard' && <Dashboard 
+             studentId={user?.uid || 'demo-student'} 
+             onNavigate={(s) => setCurrentScreen(s as ScreenState)} 
+             onTriggerUpload={() => fileInputRef.current?.click()}
+             onTriggerDehydrate={() => dehydrateInputRef.current?.click()}
+          />}
           {currentScreen === 'subject-map' && renderSubjectMap()}
           {currentScreen === 'error-book' && renderErrorBook()}
           {currentScreen === 'overview' && renderOverview()}
@@ -2928,7 +2956,7 @@ export default function App() {
 
 const NavButton = ({ icon, label, active = false, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void }) => (
   <button onClick={onClick} className={`flex flex-col items-center gap-1 p-2 transition-colors ${active ? 'text-[var(--color-primary)]' : 'text-gray-400 hover:text-gray-600'}`}>
-    {React.cloneElement(icon as React.ReactElement, { size: active ? 24 : 22, strokeWidth: active ? 3 : 2 })}
+    {React.isValidElement(icon) ? React.cloneElement(icon as React.ReactElement<any>, { size: active ? 24 : 22, strokeWidth: active ? 3 : 2 }) : icon}
     <span className={`text-[10px] font-bold ${active ? 'opacity-100' : 'opacity-80'}`}>{label}</span>
   </button>
 );

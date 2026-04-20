@@ -1,0 +1,130 @@
+import type { ExamQuestion, KnowledgePoint } from '../domain/types.js';
+
+const KNOWLEDGE_POINTS: KnowledgePoint[] = [
+  {
+    id: 'ma-g8-geom-midpoint',
+    reference: { subject: 'ma', grade: '八年级', version: '人教版', term: '下' },
+    chapter: '图形与几何',
+    section: '几何辅助线',
+    title: '中点与倍长中线',
+    masteryGoal: '遇到中点类范围题，优先尝试倍长中线或构造全等，不要直接硬算长度。',
+    keywords: ['中点', '倍长中线', '辅助线', '全等', '范围'],
+    commonMistakes: ['辅助线选择失误', '直接硬算', '不会倍长中线'],
+    prerequisiteIds: [],
+  },
+  {
+    id: 'en-g4-grammar-there-be',
+    reference: { subject: 'en', grade: '四年级', version: '人教PEP', term: '下' },
+    chapter: '语法基础',
+    section: 'There be 句型',
+    title: 'There is/are 就近一致',
+    masteryGoal: 'there be 结构优先看最近主语，最近是单数用 is，复数用 are。',
+    keywords: ['there is', 'there are', '最近主语', '单数', '复数'],
+    commonMistakes: ['there be 混淆', '忽略最近主语'],
+    prerequisiteIds: [],
+  },
+  {
+    id: 'zh-g4-phonetic-polyphone',
+    reference: { subject: 'zh', grade: '四年级', version: '部编版(人教)', term: '上' },
+    chapter: '字词积累',
+    section: '多音字辨析',
+    title: '多音字结合词义判断',
+    masteryGoal: '多音字先看词义和语境，再决定读音，不要靠单字机械记忆。',
+    keywords: ['多音字', '词义', '语境', '银行', '成长'],
+    commonMistakes: ['脱离词义判断', '机械背音'],
+    prerequisiteIds: [],
+  },
+];
+
+const EXAM_QUESTIONS: ExamQuestion[] = [
+  {
+    id: 'ma-2025-sh-final-midpoint-range',
+    subject: 'ma',
+    grade: '八年级',
+    region: '上海',
+    source: 'final-exam',
+    year: 2025,
+    term: '下',
+    questionType: '几何范围题',
+    stem: '在 △ABC 中，D 是 AB 的中点。要求 CD 的取值范围时，最稳妥的第一步辅助线是什么？',
+    answerSummary: '倍长中线，构造全等或平行四边形，再转化边的关系。',
+    score: 4,
+    difficulty: 'standard',
+    knowledgePointIds: ['ma-g8-geom-midpoint'],
+    tags: ['中点', '辅助线', '范围', '倍长中线'],
+  },
+  {
+    id: 'ma-2024-js-unit-midpoint-proof',
+    subject: 'ma',
+    grade: '八年级',
+    region: '江苏',
+    source: 'unit-test',
+    year: 2024,
+    term: '下',
+    questionType: '几何证明题',
+    stem: '已知 D 为线段 AB 中点，补充辅助线后证明两三角形全等。',
+    answerSummary: '延长中线并构造对应边相等，转入全等证明。',
+    score: 5,
+    difficulty: 'stretch',
+    knowledgePointIds: ['ma-g8-geom-midpoint'],
+    tags: ['中点', '全等', '辅助线'],
+  },
+  {
+    id: 'ma-2026-zj-diagnostic-midpoint',
+    subject: 'ma',
+    grade: '八年级',
+    region: '浙江',
+    source: 'mock',
+    year: 2026,
+    term: '上',
+    questionType: '几何综合题',
+    stem: '已知 M 为线段 AB 中点，若需证明 CM 与另一条边关系成立，优先尝试哪类辅助线？',
+    answerSummary: '优先考虑倍长中线，再结合全等或平行四边形转化关系。',
+    score: 6,
+    difficulty: 'stretch',
+    knowledgePointIds: ['ma-g8-geom-midpoint'],
+    tags: ['中点', '辅助线', '倍长中线', '综合题'],
+  },
+  {
+    id: 'en-2025-hz-final-therebe',
+    subject: 'en',
+    grade: '四年级',
+    region: '杭州',
+    source: 'final-exam',
+    year: 2025,
+    term: '下',
+    questionType: '单项选择',
+    stem: 'There ___ a sofa and two chairs in the living room.',
+    answerSummary: '看最近主语 a sofa，用 is。',
+    score: 2,
+    difficulty: 'foundation',
+    knowledgePointIds: ['en-g4-grammar-there-be'],
+    tags: ['there is', 'there are', '最近主语'],
+  },
+  {
+    id: 'zh-2024-bj-final-polyphone',
+    subject: 'zh',
+    grade: '四年级',
+    region: '北京',
+    source: 'final-exam',
+    year: 2024,
+    term: '上',
+    questionType: '字音辨析',
+    stem: '判断“行”在“银行”与“行走”中的正确读音。',
+    answerSummary: '词义不同，读音不同；银行读 hang，行走读 xing。',
+    score: 2,
+    difficulty: 'foundation',
+    knowledgePointIds: ['zh-g4-phonetic-polyphone'],
+    tags: ['多音字', '银行', '词义'],
+  },
+];
+
+export class InMemoryContentCatalog {
+  async listKnowledgePoints(): Promise<KnowledgePoint[]> {
+    return KNOWLEDGE_POINTS;
+  }
+
+  async listExamQuestions(): Promise<ExamQuestion[]> {
+    return EXAM_QUESTIONS;
+  }
+}

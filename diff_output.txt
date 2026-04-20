@@ -1,0 +1,129 @@
+App.tsx diff:
+- [Line 3] import { GoogleGenAI, Type } from "@google/genai";
+- [Line 6] Check, ChevronRight, Play, BookOpen, Star, X,
++ [Line 5] Check, ChevronRight, Play, BookOpen, Star,
+- [Line 8] Target, Cpu, Sliders, Lock, Flame, Camera, UploadCloud, Orbit, AlertTriangle
++ [Line 7] Target, Cpu, Sliders, Lock, Flame, Camera, UploadCloud, Orbit, AlertTriangle, Volume2, VolumeX
++ [Line 10] import {
++   analyzeQuestionImage,
++   createMobiusSession,
++   dehydrateHomework as dehydrateHomeworkViaApi,
++   generateCloneQuestion as generateCloneQuestionViaApi,
++   generateTheaterScript as generateTheaterScriptViaApi,
++   getMobiusStudentStateSummary,
++   refreshMobiusMediaJob,
++   resolveMobiusContent,
++   resolveMobiusInteraction,
++ } from './lib/mobius';
+- [Line 15] interface AIQuestionData {
+-   painPoint: string;
+-   rule: string;
+-   questionText: string;
+-   options: string[];
+-   correctAnswer: string;
++ [Line 25] type AIQuestionData = import('./lib/mobius').AIQuestionData;
++ type DehydrateResult = import('./lib/mobius').DehydrateResult;
++ type TheaterScript = import('./lib/mobius').TheaterScript;
++ type KnowledgeActionType = import('./lib/mobius').KnowledgeActionType;
++ type InteractionConfidence = import('./lib/mobius').InteractionConfidence;
++ type MobiusStudentStateSummaryResponse = import('./lib/mobius').MobiusStudentStateSummaryResponse;
++ 
++ const SELECT_ACTION_OPTIONS = [
++   { id: 'rule-first', label: '先触发规则动作', result: 'aligned' as const },
++   { id: 'partial-rule', label: '想到一点规则，但步骤不稳', result: 'partial' as const },
++   { id: 'guess-first', label: '先猜答案再补理由', result: 'guess' as const },
++ ];
++ 
++ const SEQUENCE_ACTION_STEPS = ['识别关键条件', '触发核心规则', '确认最终答案'];
++ const DRAW_ACTION_CHECKPOINTS = ['锁定关键点', '连接正确路径', '复核动作结果'];
++ 
++ interface TheaterMeta {
++   source: 'mobius' | 'gemini';
++   provider?: string;
++   videoStatus?: 'queued' | 'processing' | 'ready' | 'failed';
++   videoUrl?: string;
++   activeVideoUrl?: string;
++   mediaJobId?: string;
++   providerJobId?: string;
++   errorMessage?: string;
++   coachMessage?: string;
++   nextActions?: string[];
++   resolutionTitle?: string;
++   branchOutcome?: 'success' | 'failure';
++   contentKnowledgePointTitle?: string;
++   contentKnowledgePointGrade?: string;
++   contentEvidence?: string[];
++   relatedQuestionSummary?: string[];
++   diagnosedMistakeLabels?: string[];
++   knowledgeActionLabel?: string;
++   knowledgeActionType?: import('./lib/mobius').KnowledgeActionType;
++   knowledgeActionId?: string;
++   adjudicationRationale?: string[];
+- [Line 23] interface DehydrateResult {
+-   total: number;
+-   trashEasy: number;
+-   dropHard: number;
+-   mustDo: number;
+-   reasoning: string;
+-   mustDoIndices: string;
++ [Line 65] type SubjectKey = 'zh' | 'ma' | 'en';
++ type ErrorFilter = 'all' | SubjectKey;
++ 
++ interface TaskCardData {
++   id: string;
++   subject: SubjectKey;
++   title: string;
++   detail: string;
++   mins: number;
++   xp: number;
++   status: 'urgent' | 'todo' | 'done';
++   action: 'upload' | 'error' | 'dehydrate' | 'map';
++   focusSubject?: SubjectKey;
++   focusNode?: string;
+- [Line 32] interface TheaterScript {
+-   sceneIntro: string;
+-   emotion: string;
+-   interactionPrompt: string;
+-   successScene: string;
+-   failureScene: string;
++ [Line 81] interface KnowledgeNode {
++   name: string;
++   state: 'mastered' | 'learning' | 'locked';
++   progress: number;
++ [Line 87] interface TaskStatusRecord {
++   completed: boolean;
++   completedAt?: string;
++ }
++ 
++ interface KnowledgeProgressState {
++   zh: { textbook: string; nodes: { name: string; progress: number }[] };
++   ma: { textbook: string; nodes: { name: string; progress: number }[] };
++   en: { textbook: string; nodes: { name: string; progress: number }[] };
++ }
++ 
++ const SUBJECT_META: Record<SubjectKey, { name: string; short: string; color: string; light: string; icon: string; textbookLabel: string; }> = {
++   zh: { name: '丹青语文', short: '语文', color: 'var(--color-subj-zh)', light: 'rgba(255,93,115,0.12)', icon: '文', textbookLabel: '语文版图' },
++   ma: { name: '极光数学', short: '数学', color: 'var(--color-subj-ma)', light: 'rgba(0,180,216,0.12)', icon: '数', textbookLabel: '数学版图' },
++   en: { name: '阳光英语', short: '英语', color: 'var(--color-subj-en)', light: 'rgba(255,190,11,0.14)', icon: '英', textbookLabel: '英语版图' },
++ };
++ 
++ const KNOWLEDGE_LIBRARY: Record<SubjectKey, string[]> = {
++   zh: ['多音字辨析', '形近字辨别', '标点用法', '阅读主旨题', '作文三段式', '古诗默写'],
++   ma: ['几何辅助线', '面积与面积单位', '单位换算', '周长公式', '乘法估算', '应用题审题'],
++   en: ['There is/are', '情态动词 can', '天气句型', '名词复数变化', '位置词 upstairs', '完形逻辑词'],
++ };
++ 
++ const DEMO_ERRORS = [
++   {
++     id: 'demo-ma-1',
++     painPoint: '几何中点辅助线选择失误',
++     rule: '遇中点，先想倍长中线；造全等比硬算更稳。',
++     questionText: '在 △ABC 中，D 为 AB 中点，要求 CD 的范围时，第一步最稳妥的辅助线是什么？',
++     options: ['过 D 作 DE // BC', '延长 CD 至 E，使 DE = CD，连接 AE, BE', '过 C 作 CF ⊥ AB', '作 BC 的垂直平分线'],
++     status: 'active',
++   },
++   {
++     id: 'demo-en-1',
++     painPoint: 'There is/are 结构混淆',
++     rule: 'there be 看最近主语，单数 is，复数
+... (truncated due to length)

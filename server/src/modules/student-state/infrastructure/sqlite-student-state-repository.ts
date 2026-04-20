@@ -74,12 +74,13 @@ export class SQLiteStudentStateRepository implements StudentStateRepository {
     return record;
   }
 
-  async listByStudent(studentId: string): Promise<StudentStateSnapshot[]> {
+  async listByStudent(studentId: string, limit: number = 50, offset: number = 0): Promise<StudentStateSnapshot[]> {
     const rows = this.db.prepare(`
       SELECT * FROM student_state_snapshots
       WHERE student_id = ?
       ORDER BY created_at DESC
-    `).all(studentId) as unknown as StudentStateSnapshotRow[];
+      LIMIT ? OFFSET ?
+    `).all(studentId, limit, offset) as unknown as StudentStateSnapshotRow[];
 
     return rows.map((row) => this.mapRow(row));
   }
@@ -93,6 +94,25 @@ export class SQLiteStudentStateRepository implements StudentStateRepository {
     `).get(studentId) as unknown as StudentStateSnapshotRow | undefined;
 
     return row ? this.mapRow(row) : null;
+  }
+
+  async getStatsByStudent(studentId: string) {
+    const row = this.db.prepare(`
+      SELECT 
+        COUNT(id) as totalSnapshots,
+        SUM(CASE WHEN source = 'session-created' THEN 1 ELSE 0 END) as totalSessions,
+        SUM(CASE WHEN interaction_outcome = 'success' THEN 1 ELSE 0 END) as interactionSuccessCount,
+        SUM(CASE WHEN interaction_outcome = 'failure' THEN 1 ELSE 0 END) as interactionFailureCount
+      FROM student_state_snapshots
+      WHERE student_id = ?
+    `).get(studentId) as any;
+
+    return {
+      totalSnapshots: Number(row.totalSnapshots || 0),
+      totalSessions: Number(row.totalSessions || 0),
+      interactionSuccessCount: Number(row.interactionSuccessCount || 0),
+      interactionFailureCount: Number(row.interactionFailureCount || 0),
+    };
   }
 
   private mapRow(row: StudentStateSnapshotRow): StudentStateSnapshot {

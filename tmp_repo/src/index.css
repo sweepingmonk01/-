@@ -1,0 +1,65 @@
+@import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800;900&family=ZCOOL+KuaiLe&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: 'Nunito', ui-sans-serif, system-ui, sans-serif;
+  --font-display: 'ZCOOL KuaiLe', 'Nunito', sans-serif;
+
+  --color-primary: #3D7BFF;
+  --color-primary-dark: #2B5BDE;
+  --color-secondary: #FF8A3D;
+  --color-accent-green: #33D1A0;
+  --color-accent-pink: #FF5FA2;
+  
+  --color-bg-base: #F4F6FB;
+  --color-bg-paper: #FFFFFF;
+  
+  --color-subj-zh: #FF5D73;
+  --color-subj-ma: #00B4D8;
+  --color-subj-en: #FFBE0B;
+}
+
+body {
+  background-color: var(--color-bg-base);
+  color: #1a1a2e;
+  overflow-x: hidden;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.game-card {
+  background: white;
+  border-radius: 20px;
+  border: 3px solid #1a1a2e;
+  box-shadow: 4px 6px 0px #1A1A2E;
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.game-card:active {
+  transform: translateY(4px) translateX(2px);
+  box-shadow: 0px 2px 0px #1A1A2E;
+}
+
+.game-btn {
+  border-radius: 9999px;
+  border: 3px solid #1a1a2e;
+  box-shadow: 3px 5px 0px #1A1A2E;
+  font-weight: 800;
+  transition: all 0.1s ease;
+  cursor: pointer;
+}
+
+.game-btn[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: 3px 5px 0px #1A1A2E;
+}
+
+.game-btn:not([disabled]):active {
+  transform: translateY(3px) translateX(2px);
+  box-shadow: 0px 2px 0px #1A1A2E;
+}
+
+.retro-text-shadow {
+  text-shadow: 2px 2px 0px rgba(0,0,0,0.2);
+}

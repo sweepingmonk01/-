@@ -1,11 +1,9 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
-import { getFirestore, doc, setDoc, getDoc, updateDoc, serverTimestamp, collection, getDocs, query, where, orderBy } from "firebase/firestore";
 import firebaseConfig from "../../firebase-applet-config.json";
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
-export const db = getFirestore(app, firebaseConfig.firestoreDatabaseId);
 export const googleProvider = new GoogleAuthProvider();
 
 export const loginWithGoogle = async () => {
@@ -22,68 +20,55 @@ export const logoutUser = async () => {
 };
 
 export const syncUserProfile = async (uid: string, data: any) => {
-  const userRef = doc(db, 'users', uid);
-  const snap = await getDoc(userRef);
-  if (snap.exists()) {
-    await updateDoc(userRef, {
-      ...data,
-      updatedAt: serverTimestamp()
-    });
-  } else {
-    await setDoc(userRef, {
-      ...data,
-      targetScore: data.targetScore || 115,
-      timeSaved: data.timeSaved || 0,
-      cognitiveState: { focus: 50, frustration: 0, joy: 50 },
-      createdAt: serverTimestamp(),
-      updatedAt: serverTimestamp()
-    });
-  }
+  if (uid === 'demo-student') return;
+  const res = await fetch(`/api/mobius/students/${encodeURIComponent(uid)}/profile`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+  if (!res.ok) throw new Error('API failed to sync profile');
 };
 
 export const updateCognitiveState = async (uid: string, changes: Partial<{focus: number, frustration: number, joy: number}>) => {
-  const userRef = doc(db, 'users', uid);
-  const snap = await getDoc(userRef);
-  if (snap.exists()) {
-    const currentState = snap.data().cognitiveState || { focus: 50, frustration: 0, joy: 50 };
-    await updateDoc(userRef, {
-      cognitiveState: { ...currentState, ...changes },
-      updatedAt: serverTimestamp()
-    });
+  if (uid === 'demo-student') return;
+  const profile = await getUserProfile(uid);
+  if (profile) {
+    const currentState = profile.cognitiveState || { focus: 50, frustration: 0, joy: 50 };
+    await syncUserProfile(uid, { cognitiveState: { ...currentState, ...changes } });
   }
 };
 
 export const getUserProfile = async (uid: string) => {
-  const userRef = doc(db, 'users', uid);
-  const snap = await getDoc(userRef);
-  return snap.exists() ? snap.data() : null;
+  if (uid === 'demo-student') return null;
+  const res = await fetch(`/api/mobius/students/${encodeURIComponent(uid)}/profile`);
+  if (!res.ok) return null;
+  const data = await res.json();
+  return Object.keys(data).length > 0 ? data : null;
 };
 
 export const saveErrorRecord = async (uid: string, errorData: any) => {
-  const newErrorRef = doc(collection(db, `users/${uid}/errors`));
-  await setDoc(newErrorRef, {
-    painPoint: errorData.painPoint,
-    rule: errorData.rule,
-    questionText: errorData.questionText,
-    options: errorData.options,
-    status: 'active',
-    createdAt: serverTimestamp(),
-    updatedAt: serverTimestamp()
+  if (uid === 'demo-student') return;
+  const res = await fetch(`/api/mobius/students/${encodeURIComponent(uid)}/errors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(errorData)
   });
+  if (!res.ok) throw new Error('API failed to save error record');
 };
 
 export const getActiveErrors = async (uid: string) => {
-  const errorsRef = collection(db, `users/${uid}/errors`);
-  const q = query(errorsRef, where("status", "==", "active"));
-  const querySnapshot = await getDocs(q);
-  return querySnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  if (uid === 'demo-student') return [];
+  const res = await fetch(`/api/mobius/students/${encodeURIComponent(uid)}/errors`);
+  if (!res.ok) return [];
+  const payload = await res.json();
+  return payload.items || [];
 };
 
 export const resolveError = async (uid: string, errorId: string) => {
-  const errorRef = doc(db, `users/${uid}/errors`, errorId);
-  await updateDoc(errorRef, {
-    status: 'resolved',
-    updatedAt: serverTimestamp()
+  if (uid === 'demo-student') return;
+  const res = await fetch(`/api/mobius/students/${encodeURIComponent(uid)}/errors/${encodeURIComponent(errorId)}/resolve`, {
+    method: 'PATCH'
   });
+  if (!res.ok) throw new Error('API failed to resolve error record');
 };
 

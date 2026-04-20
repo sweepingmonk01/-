@@ -27,16 +27,29 @@ export class FileStudentStateRepository implements StudentStateRepository {
     return record;
   }
 
-  async listByStudent(studentId: string): Promise<StudentStateSnapshot[]> {
+  async listByStudent(studentId: string, limit: number = 50, offset: number = 0): Promise<StudentStateSnapshot[]> {
     const snapshots = await this.readAll();
-    return snapshots
+    const sorted = snapshots
       .filter((snapshot) => snapshot.studentId === studentId)
       .sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+    return sorted.slice(offset, offset + limit);
   }
 
   async getLatestByStudent(studentId: string): Promise<StudentStateSnapshot | null> {
-    const snapshots = await this.listByStudent(studentId);
+    const snapshots = await this.listByStudent(studentId, 1, 0);
     return snapshots[0] ?? null;
+  }
+
+  async getStatsByStudent(studentId: string) {
+    const snapshots = await this.readAll();
+    const studentData = snapshots.filter((snapshot) => snapshot.studentId === studentId);
+    
+    return {
+      totalSnapshots: studentData.length,
+      totalSessions: studentData.filter(s => s.source === 'session-created').length,
+      interactionSuccessCount: studentData.filter(s => s.interactionOutcome === 'success').length,
+      interactionFailureCount: studentData.filter(s => s.interactionOutcome === 'failure').length,
+    };
   }
 
   private async readAll(): Promise<StudentStateSnapshot[]> {

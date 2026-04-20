@@ -10,7 +10,7 @@ export class StudentStateSummaryService {
   constructor(private readonly deps: StudentStateSummaryServiceDeps) {}
 
   async getStudentStateSummary(studentId: string): Promise<StudentStateSummary | null> {
-    const snapshots = await this.deps.repository.listByStudent(studentId);
+    const snapshots = await this.deps.repository.listByStudent(studentId, 50, 0); // Recent bounded memory limit (RAG buffer equivalent for history)
     if (snapshots.length === 0) return null;
 
     const ordered = [...snapshots].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
@@ -18,8 +18,18 @@ export class StudentStateSummaryService {
     const recentPainPoints = this.collectUnique(ordered.map((snapshot) => snapshot.profile.painPoint), 3);
     const activeRules = this.collectUnique(ordered.map((snapshot) => snapshot.profile.rule), 3);
     const interactionSnapshots = ordered.filter((snapshot) => snapshot.source === 'interaction-resolved');
-    const successCount = interactionSnapshots.filter((snapshot) => snapshot.interactionOutcome === 'success').length;
-    const failureCount = interactionSnapshots.filter((snapshot) => snapshot.interactionOutcome === 'failure').length;
+
+    let stats = {
+      totalSnapshots: ordered.length,
+      totalSessions: ordered.filter((snapshot) => snapshot.source === 'session-created').length,
+      interactionSuccessCount: interactionSnapshots.filter((snapshot) => snapshot.interactionOutcome === 'success').length,
+      interactionFailureCount: interactionSnapshots.filter((snapshot) => snapshot.interactionOutcome === 'failure').length,
+    };
+
+    if (this.deps.repository.getStatsByStudent) {
+      stats = await this.deps.repository.getStatsByStudent(studentId);
+    }
+
     const mistakeCategoryCounts = ordered.reduce<Partial<Record<MistakeCategory, number>>>((counts, snapshot) => {
       for (const category of snapshot.profile.diagnosedMistakeCategories) {
         counts[category] = (counts[category] ?? 0) + 1;
@@ -30,11 +40,11 @@ export class StudentStateSummaryService {
     return {
       studentId,
       latestSnapshotAt: latest.createdAt,
-      totalSnapshots: ordered.length,
-      totalSessions: ordered.filter((snapshot) => snapshot.source === 'session-created').length,
+      totalSnapshots: stats.totalSnapshots,
+      totalSessions: stats.totalSessions,
       interactionStats: {
-        successCount,
-        failureCount,
+        successCount: stats.interactionSuccessCount,
+        failureCount: stats.interactionFailureCount,
         lastOutcome: interactionSnapshots[0]?.interactionOutcome,
       },
       currentCognitiveState: latest.cognitiveState,
