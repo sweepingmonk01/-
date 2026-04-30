@@ -1,8 +1,12 @@
 import express from 'express';
+import { config as loadEnv } from 'dotenv';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { createMobiusApp } from './src/app.js';
 import { getServerEnv } from './src/config/env.js';
+
+loadEnv({ path: '.env.local' });
+loadEnv();
 
 async function startServer() {
   const env = getServerEnv();
@@ -12,8 +16,7 @@ async function startServer() {
   
   // 2. Wrap it with the Main AI Studio Container
   const app = express();
-  // AI Studio enforces external requests over port 3000
-  const PORT = 3000;
+  const PORT = env.port;
 
   // Mount API paths first
   app.use(mobiusApp);

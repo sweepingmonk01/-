@@ -1,29 +1,71 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { Suspense, lazy, useEffect, useRef, useState } from 'react';
 import { motion, AnimatePresence } from 'motion/react';
-import ReactPlayer from 'react-player';
 import { 
   Sword, Map as MapIcon, ShieldAlert, Zap, Clock, 
   Check, ChevronRight, Play, BookOpen, Star, 
   BrainCircuit, RefreshCw, Trophy, Beaker,
-  Target, Cpu, Sliders, Lock, Flame, Camera, UploadCloud, Orbit, AlertTriangle, Volume2, VolumeX
+  Target, Cpu, Sliders, Camera, Orbit, AlertTriangle, Volume2, VolumeX, Compass, Navigation
 } from 'lucide-react';
 import { auth, loginWithGoogle, logoutUser, syncUserProfile, getUserProfile, saveErrorRecord, getActiveErrors, resolveError, updateCognitiveState } from './lib/firebase';
-import {
-  analyzeQuestionImage,
-  createMobiusSession,
-  dehydrateHomework as dehydrateHomeworkViaApi,
-  generateCloneQuestion as generateCloneQuestionViaApi,
-  generateTheaterScript as generateTheaterScriptViaApi,
-  getMobiusStudentStateSummary,
-  refreshMobiusMediaJob,
-  resolveMobiusContent,
-  resolveMobiusInteraction,
-} from './lib/mobius';
 import { onAuthStateChanged } from 'firebase/auth';
+import { buildDashboardViewState } from '../shared/dashboard-metrics';
+import type { DashboardViewState } from '../shared/dashboard-metrics';
+import { buildOverviewViewState } from '../shared/overview-metrics';
+import {
+  createDefaultCognitiveState,
+  normalizeCognitiveState,
+  projectDashboardRadarState,
+  type CognitiveState,
+} from '../shared/cognitive-state';
 
-import Dashboard from './components/Dashboard';
+import type { LinkedKnowledgeGraphError } from './components/error-book/KnowledgeGraphSummary';
+import { DRAW_ACTION_CHECKPOINTS, SELECT_ACTION_OPTIONS, SEQUENCE_ACTION_STEPS } from './components/theater/theater-constants';
+import type { TheaterMeta } from './components/theater/theater-types';
+import type { ExploreEngineKey } from './features/explore/data/exploreTypes';
+import type { LightweightMistakeRecord } from './features/explore/utils/aiActiveStateFromExplore';
+import {
+  getYufengDailyTaskState,
+  subscribeYufengDailyTaskUpdated,
+  type YufengDailyTaskState,
+} from './features/explore/cockpit/yufengDailyTaskState';
 
-type ScreenState = 'welcome' | 'profile-setup' | 'diagnostic-loading' | 'target-setter' | 'dashboard' | 'subject-map' | 'error-book' | 'overview' | 'combat' | 'combat-feedback' | 'report' | 'dehydrator' | 'theater';
+type MobiusApi = typeof import('./lib/mobius');
+
+const loadMobiusApi = () => import('./lib/mobius');
+const loadExploreRecommendationTools = async () => {
+  const [exploreData, recommendExploreNodes] = await Promise.all([
+    import('./features/explore/data/exploreData'),
+    import('./features/explore/utils/recommendExploreNodes'),
+  ]);
+
+  return {
+    getEngineByKey: exploreData.getEngineByKey,
+    recommendExploreNodesForMistake: recommendExploreNodes.recommendExploreNodesForMistake,
+  };
+};
+
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const CombatFlow = lazy(() => import('./components/combat/CombatFlow'));
+const DehydratorFlow = lazy(() => import('./components/dehydrator/DehydratorFlow'));
+const InteractiveTheater = lazy(() => import('./components/theater/InteractiveTheater'));
+const WelcomeScreen = lazy(() => import('./components/onboarding/OnboardingScreens').then((module) => ({ default: module.WelcomeScreen })));
+const ProfileSetupScreen = lazy(() => import('./components/onboarding/OnboardingScreens').then((module) => ({ default: module.ProfileSetupScreen })));
+const DiagnosticLoadingScreen = lazy(() => import('./components/onboarding/OnboardingScreens').then((module) => ({ default: module.DiagnosticLoadingScreen })));
+const TargetSetterScreen = lazy(() => import('./components/onboarding/OnboardingScreens').then((module) => ({ default: module.TargetSetterScreen })));
+const SubjectMapView = lazy(() => import('./components/views/SubjectMapView'));
+const ErrorBookView = lazy(() => import('./components/views/ErrorBookView'));
+const OverviewView = lazy(() => import('./components/views/OverviewView'));
+const ReportView = lazy(() => import('./components/views/ReportView'));
+const FoundationScienceView = lazy(() => import('./components/views/FoundationScienceView'));
+const ExploreView = lazy(() => import('./features/explore/components/ExploreView'));
+const ExploreCockpitView = lazy(() => import('./features/explore/components/ExploreCockpitView'));
+
+type ScreenState = 'welcome' | 'profile-setup' | 'diagnostic-loading' | 'target-setter' | 'dashboard' | 'subject-map' | 'error-book' | 'overview' | 'foundation-science' | 'explore' | 'explore-cockpit' | 'combat' | 'combat-feedback' | 'report' | 'dehydrator' | 'theater';
+type AsyncSurfaceState = 'idle' | 'loading' | 'refreshing' | 'ready' | 'error';
+interface ExploreRouteState {
+  engineKey?: string;
+  nodeKey?: string;
+}
 
 type AIQuestionData = import('./lib/mobius').AIQuestionData;
 type DehydrateResult = import('./lib/mobius').DehydrateResult;
@@ -31,15 +73,9 @@ type TheaterScript = import('./lib/mobius').TheaterScript;
 type KnowledgeActionType = import('./lib/mobius').KnowledgeActionType;
 type InteractionConfidence = import('./lib/mobius').InteractionConfidence;
 type MobiusStudentStateSummaryResponse = import('./lib/mobius').MobiusStudentStateSummaryResponse;
+type KnowledgeGraphSnapshot = import('./lib/mobius').KnowledgeGraphSnapshot;
+type SocraticThread = import('./lib/mobius').SocraticThread;
 
-const SELECT_ACTION_OPTIONS = [
-  { id: 'rule-first', label: '先触发规则动作', result: 'aligned' as const },
-  { id: 'partial-rule', label: '想到一点规则，但步骤不稳', result: 'partial' as const },
-  { id: 'guess-first', label: '先猜答案再补理由', result: 'guess' as const },
-];
-
-const SEQUENCE_ACTION_STEPS = ['识别关键条件', '触发核心规则', '确认最终答案'];
-const DRAW_ACTION_CHECKPOINTS = ['锁定关键点', '连接正确路径', '复核动作结果'];
 const WELCOME_OUTCOMES = [
   { label: '今日主线', value: '3 步拿回最值分', accent: 'text-[var(--color-primary)]' },
   { label: '长期模型', value: '持续记住痛点与规则', accent: 'text-[var(--color-secondary)]' },
@@ -51,30 +87,6 @@ const WELCOME_SIGNALS = [
   { icon: Target, title: '今日最短提分路径', detail: '首页任务直接跟着 state-summary 和错题主线走，先干最值的那一题。', tone: 'bg-[rgba(61,123,255,0.14)] text-[var(--color-primary)]' },
   { icon: BookOpen, title: '练习不是堆量', detail: '错题、知识图谱、剧场分支会互相回流，让每次交互都留下可用证据。', tone: 'bg-[rgba(51,209,160,0.14)] text-[var(--color-accent-green)]' },
 ];
-
-interface TheaterMeta {
-  source: 'mobius' | 'gemini';
-  provider?: string;
-  videoStatus?: 'queued' | 'processing' | 'ready' | 'failed';
-  videoUrl?: string;
-  activeVideoUrl?: string;
-  mediaJobId?: string;
-  providerJobId?: string;
-  errorMessage?: string;
-  coachMessage?: string;
-  nextActions?: string[];
-  resolutionTitle?: string;
-  branchOutcome?: 'success' | 'failure';
-  contentKnowledgePointTitle?: string;
-  contentKnowledgePointGrade?: string;
-  contentEvidence?: string[];
-  relatedQuestionSummary?: string[];
-  diagnosedMistakeLabels?: string[];
-  knowledgeActionLabel?: string;
-  knowledgeActionType?: import('./lib/mobius').KnowledgeActionType;
-  knowledgeActionId?: string;
-  adjudicationRationale?: string[];
-}
 
 type SubjectKey = 'zh' | 'ma' | 'en';
 type ErrorFilter = 'all' | SubjectKey;
@@ -96,6 +108,7 @@ interface KnowledgeNode {
   name: string;
   state: 'mastered' | 'learning' | 'locked';
   progress: number;
+  targetErrorId?: string | null;
 }
 
 interface TaskStatusRecord {
@@ -107,6 +120,56 @@ interface KnowledgeProgressState {
   zh: { textbook: string; nodes: { name: string; progress: number }[] };
   ma: { textbook: string; nodes: { name: string; progress: number }[] };
   en: { textbook: string; nodes: { name: string; progress: number }[] };
+}
+
+interface FocusRecommendation {
+  matchedError?: any;
+  subject: SubjectKey;
+  node: string;
+  painPoint?: string;
+  rule?: string;
+}
+
+interface ErrorBookFocusContext {
+  subject: SubjectKey;
+  node: string;
+  errorId?: string | null;
+  source: 'map' | 'graph' | 'task';
+}
+
+type KnowledgeGraphNoticeTone = 'info' | 'success' | 'warning';
+
+interface ErrorExploreRecommendation {
+  mistakeTitle: string;
+  mistakeDescription: string;
+  repairAction: string;
+  primaryNode: {
+    key: string;
+    label: string;
+    engineKey: ExploreEngineKey;
+    engineTitle: string;
+    engineSubtitle: string;
+    accentColor: string;
+  };
+  secondaryNodes: {
+    key: string;
+    label: string;
+    engineTitle: string;
+  }[];
+}
+
+function getYufengStatusDotClass(status?: string) {
+  switch (status) {
+    case 'started':
+      return 'bg-cyan-400 shadow-[0_0_10px_rgba(34,211,238,0.72)]';
+    case 'evidence-submitted':
+    case 'snapshot-ready':
+      return 'bg-violet-400 shadow-[0_0_10px_rgba(167,139,250,0.72)]';
+    case 'completed':
+      return 'bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.72)]';
+    default:
+      return '';
+  }
 }
 
 const SUBJECT_META: Record<SubjectKey, { name: string; short: string; color: string; light: string; icon: string; textbookLabel: string; }> = {
@@ -184,6 +247,80 @@ const getErrorMeta = (errorItem: any) => {
   };
 };
 
+const normalizeKnowledgeKey = (value?: string | null) => (
+  (value ?? '')
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, '')
+    .replace(/[·•\-—_/\\()（）【】\[\]'"“”‘’,.，。:：;；!?！？]/g, '')
+);
+
+const resolveNodeTargetErrorId = (
+  subject: SubjectKey,
+  nodeName: string,
+  errors: any[],
+) => {
+  const normalizedNodeName = normalizeKnowledgeKey(nodeName);
+  if (!normalizedNodeName) return null;
+
+  let bestMatch: { id: string; score: number } | null = null;
+
+  for (const errorItem of errors) {
+    if (!errorItem?.id) continue;
+
+    const meta = getErrorMeta(errorItem);
+    if (meta.subject !== subject) continue;
+
+    const normalizedMetaNode = normalizeKnowledgeKey(meta.node);
+    const normalizedCorpus = normalizeKnowledgeKey(
+      [errorItem.painPoint, errorItem.rule, errorItem.questionText]
+        .filter(Boolean)
+        .join(' '),
+    );
+
+    const score =
+      normalizedMetaNode === normalizedNodeName
+        ? 100
+        : normalizedCorpus.includes(normalizedNodeName)
+          ? 60
+          : 0;
+
+    if (!score) continue;
+
+    if (!bestMatch || score > bestMatch.score) {
+      bestMatch = { id: errorItem.id, score };
+    }
+  }
+
+  return bestMatch?.id ?? null;
+};
+
+const formatKnowledgeGraphErrorMessage = (error: unknown, hasFallbackGraph: boolean) => {
+  const message = error instanceof Error ? error.message : 'Unknown error';
+
+  if (message.includes('403')) {
+    return hasFallbackGraph
+      ? '图谱刷新失败：当前账号没有读取这份图谱的权限，已先保留上一次结果。'
+      : '图谱刷新失败：当前账号没有读取这份图谱的权限。';
+  }
+
+  if (message.includes('503')) {
+    return hasFallbackGraph
+      ? '图谱刷新失败：图谱服务暂时不可用，已先保留上一次结果，可稍后重试。'
+      : '图谱刷新失败：图谱服务暂时不可用，可稍后重试。';
+  }
+
+  if (message.includes('500')) {
+    return hasFallbackGraph
+      ? '图谱刷新失败：服务端生成图谱时出错，已先保留上一次结果，可继续重试。'
+      : '图谱刷新失败：服务端生成图谱时出错，可继续重试。';
+  }
+
+  return hasFallbackGraph
+    ? '图谱刷新失败：当前先保留上一次可用结果，你可以继续点击重试。'
+    : '图谱刷新失败：当前还没有拿到可用图谱，你可以继续点击重试。';
+};
+
 const getErrorRecencyLabel = (index: number) => {
   if (index === 0) return '刚刚录入';
   if (index < 3) return '24h 内高危';
@@ -191,17 +328,61 @@ const getErrorRecencyLabel = (index: number) => {
   return '待回访';
 };
 
+const clampMapProgress = (value: number, min: number = 24, max: number = 96) => (
+  Math.max(min, Math.min(max, Math.round(value)))
+);
+
 const getTodayKey = () => new Date().toISOString().slice(0, 10);
+
+const parseExploreRouteFromPath = (): ExploreRouteState | null => {
+  if (typeof window === 'undefined') return null;
+  const parts = window.location.pathname.split('/').filter(Boolean);
+  if (parts[0] !== 'explore') return null;
+  if (parts[1] === 'cockpit') return null;
+  return {
+    engineKey: parts[1] ? decodeURIComponent(parts[1]) : undefined,
+    nodeKey: parts[2] ? decodeURIComponent(parts[2]) : undefined,
+  };
+};
+
+const parseExploreCockpitPath = () => {
+  if (typeof window === 'undefined') return false;
+  return window.location.pathname === '/explore/cockpit' || window.location.pathname === '/yufeng';
+};
+
+const buildExplorePath = (route: ExploreRouteState) => {
+  const parts = ['explore'];
+  if (route.engineKey) parts.push(encodeURIComponent(route.engineKey));
+  if (route.engineKey && route.nodeKey) parts.push(encodeURIComponent(route.nodeKey));
+  return `/${parts.join('/')}`;
+};
+
+const mapErrorToAIActiveMistake = (errorItem: any): LightweightMistakeRecord => ({
+  id: errorItem?.id,
+  mistakeKey: errorItem?.mistakeKey ?? errorItem?.mistakePatternKey,
+  painPoint: errorItem?.painPoint,
+  rule: errorItem?.rule,
+  questionText: errorItem?.questionText,
+  node: errorItem?.node ?? errorItem?.knowledgeNode,
+  diagnosedMistakes: errorItem?.diagnosedMistakes,
+  isResolved: Boolean(errorItem?.isResolved ?? errorItem?.resolvedAt ?? errorItem?.status === 'resolved'),
+  createdAt: errorItem?.createdAt,
+});
 
 export default function App() {
   const todayKey = getTodayKey();
-  const [currentScreen, setCurrentScreen] = useState<ScreenState>('welcome');
+  const [currentScreen, setCurrentScreen] = useState<ScreenState>(() => {
+    if (parseExploreCockpitPath()) return 'explore-cockpit';
+    return parseExploreRouteFromPath() ? 'explore' : 'welcome';
+  });
+  const [exploreRoute, setExploreRoute] = useState<ExploreRouteState>(() => parseExploreRouteFromPath() ?? {});
   const [timeSaved, setTimeSaved] = useState(0);
   const [targetScore, setTargetScore] = useState(115);
   
   // Auth state
   const [user, setUser] = useState<any>(null);
   const [authChecking, setAuthChecking] = useState(true);
+  const [welcomeError, setWelcomeError] = useState<string | null>(null);
 
   // Profile settings state
   const [grade, setGrade] = useState('');
@@ -222,7 +403,7 @@ export default function App() {
           if (profile.textbooks) setTextbooks(profile.textbooks);
           if (profile.targetScore) setTargetScore(profile.targetScore);
           if (profile.timeSaved !== undefined) setTimeSaved(profile.timeSaved);
-          if (profile.cognitiveState) setCogState(profile.cognitiveState);
+          if (profile.cognitiveState) setCogState(normalizeCognitiveState(profile.cognitiveState));
           if (profile.theaterCueEnabled !== undefined) setTheaterCueEnabled(Boolean(profile.theaterCueEnabled));
           if (profile.taskStatusDate === todayKey) {
             setTaskStatus(profile.todayTaskStatus || {});
@@ -242,6 +423,7 @@ export default function App() {
           console.error(error);
         }
         await refreshStudentStateSummary(u.uid);
+        await refreshKnowledgeGraph(u.uid);
       } else {
         setTaskStatus({});
         setTaskStatusDate('');
@@ -249,6 +431,10 @@ export default function App() {
         setPracticeQueue([]);
         setPracticeIndex(0);
         setStudentStateSummary(null);
+        setStudentStateSummaryStatus('idle');
+        setKnowledgeGraph(null);
+        setKnowledgeGraphStatus('idle');
+        setKnowledgeGraphError(null);
       }
       setAuthChecking(false);
     });
@@ -289,10 +475,11 @@ export default function App() {
   const [theaterReadyCueActive, setTheaterReadyCueActive] = useState(false);
   
   // Cognitive Engine State
-  const [cogState, setCogState] = useState({ focus: 50, frustration: 0, joy: 50 });
+  const [cogState, setCogState] = useState<CognitiveState>(() => createDefaultCognitiveState());
 
   const fileInputRef = useRef<HTMLInputElement>(null);
   const dehydrateInputRef = useRef<HTMLInputElement>(null);
+  const errorCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const previousActiveVideoUrlRef = useRef<string | undefined>(undefined);
   const theaterAudioContextRef = useRef<AudioContext | null>(null);
 
@@ -307,21 +494,135 @@ export default function App() {
   const [practiceIndex, setPracticeIndex] = useState(0);
   const [demoMode, setDemoMode] = useState(false);
   const [studentStateSummary, setStudentStateSummary] = useState<MobiusStudentStateSummaryResponse | null>(null);
+  const [studentStateSummaryStatus, setStudentStateSummaryStatus] = useState<AsyncSurfaceState>('idle');
+  const [knowledgeGraph, setKnowledgeGraph] = useState<KnowledgeGraphSnapshot | null>(null);
+  const [knowledgeGraphStatus, setKnowledgeGraphStatus] = useState<AsyncSurfaceState>('idle');
+  const [knowledgeGraphError, setKnowledgeGraphError] = useState<string | null>(null);
+  const [knowledgeGraphNotice, setKnowledgeGraphNotice] = useState<{ tone: KnowledgeGraphNoticeTone; message: string } | null>(null);
+  const [graphFocusedErrorId, setGraphFocusedErrorId] = useState<string | null>(null);
+  const [errorBookFocus, setErrorBookFocus] = useState<ErrorBookFocusContext | null>(null);
+  const [errorExploreRecommendations, setErrorExploreRecommendations] = useState<Record<string, ErrorExploreRecommendation | null>>({});
+  const [yufengTaskState, setYufengTaskState] = useState<YufengDailyTaskState | null>(() => getYufengDailyTaskState());
+  const [foundationFocusKey, setFoundationFocusKey] = useState<string | null>(null);
+  const [socraticReplyDraft, setSocraticReplyDraft] = useState('');
+  const [socraticReplyPending, setSocraticReplyPending] = useState(false);
+
+  const pushBrowserPath = (path: string) => {
+    if (typeof window === 'undefined') return;
+    if (window.location.pathname === path) return;
+    window.history.pushState(null, '', path);
+  };
+
+  const navigateScreen = (screen: ScreenState) => {
+    setCurrentScreen(screen);
+    if (screen === 'explore') {
+      setExploreRoute({});
+      pushBrowserPath('/explore');
+      return;
+    }
+    if (typeof window !== 'undefined' && window.location.pathname.startsWith('/explore')) {
+      pushBrowserPath('/');
+    }
+  };
+
+  const navigateExplore = (route: ExploreRouteState) => {
+    setExploreRoute(route);
+    setCurrentScreen('explore');
+    pushBrowserPath(buildExplorePath(route));
+  };
+
+  const navigateExploreCockpit = () => {
+    setExploreRoute({});
+    setCurrentScreen('explore-cockpit');
+    pushBrowserPath('/explore/cockpit');
+  };
+
+  useEffect(() => {
+    const handlePopState = () => {
+      if (parseExploreCockpitPath()) {
+        setExploreRoute({});
+        setCurrentScreen('explore-cockpit');
+        return;
+      }
+
+      const parsedExploreRoute = parseExploreRouteFromPath();
+      if (parsedExploreRoute) {
+        setExploreRoute(parsedExploreRoute);
+        setCurrentScreen('explore');
+        return;
+      }
+      setExploreRoute({});
+      setCurrentScreen(user || demoMode ? 'dashboard' : 'welcome');
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, [demoMode, user]);
 
   const refreshStudentStateSummary = async (studentId: string) => {
+    setStudentStateSummaryStatus(studentStateSummary ? 'refreshing' : 'loading');
     try {
+      const { getMobiusStudentStateSummary } = await loadMobiusApi();
       const summary = await getMobiusStudentStateSummary(studentId);
       setStudentStateSummary(summary);
+      setStudentStateSummaryStatus('ready');
     } catch (error) {
       setStudentStateSummary(null);
-      if ((error as Error).message.includes('404')) return;
+      if ((error as Error).message.includes('404')) {
+        setStudentStateSummaryStatus('ready');
+        return;
+      }
+      setStudentStateSummaryStatus('error');
       console.warn('Mobius state summary refresh failed.', error);
+    }
+  };
+
+  const refreshKnowledgeGraph = async (studentId: string, options?: { manual?: boolean }) => {
+    setKnowledgeGraphStatus(knowledgeGraph ? 'refreshing' : 'loading');
+    setKnowledgeGraphError(null);
+    if (options?.manual) {
+      setKnowledgeGraphNotice({
+        tone: 'info',
+        message: '正在重构知识图谱，节点和连边会在刷新完成后更新。',
+      });
+    }
+
+    try {
+      const { getKnowledgeGraph } = await loadMobiusApi();
+      const snapshot = await getKnowledgeGraph(studentId);
+      setKnowledgeGraph(snapshot);
+      setKnowledgeGraphStatus('ready');
+      setKnowledgeGraphError(null);
+      setKnowledgeGraphNotice({
+        tone: snapshot.nodes.length ? 'success' : 'warning',
+        message: snapshot.nodes.length
+          ? `图谱已更新：${snapshot.nodes.length} 个节点，${snapshot.edges.length} 条连边。`
+          : '图谱已刷新，但当前还没有足够错题沉淀出可用节点。',
+      });
+    } catch (error) {
+      if ((error as Error).message.includes('404')) {
+        setKnowledgeGraph(null);
+        setKnowledgeGraphStatus('ready');
+        setKnowledgeGraphNotice({
+          tone: 'warning',
+          message: '当前还没有可用图谱，继续沉淀错题后会自动长出节点。',
+        });
+        return;
+      }
+      setKnowledgeGraphStatus('error');
+      setKnowledgeGraphError(formatKnowledgeGraphErrorMessage(error, Boolean(knowledgeGraph)));
+      setKnowledgeGraphNotice({
+        tone: 'warning',
+        message: '你可以继续点击“刷新图谱”重试，系统会优先保留上一次可用结果。',
+      });
+      console.warn('Knowledge graph refresh failed.', error);
     }
   };
 
   useEffect(() => {
     if (!user && demoMode) {
       void refreshStudentStateSummary('demo-student');
+      void refreshKnowledgeGraph('demo-student');
     }
   }, [user, demoMode]);
 
@@ -339,6 +640,7 @@ export default function App() {
     let cancelled = false;
     const intervalId = window.setInterval(async () => {
       try {
+        const { refreshMobiusMediaJob } = await loadMobiusApi();
         const job = await refreshMobiusMediaJob(theaterMeta.mediaJobId!);
         if (cancelled) return;
 
@@ -352,6 +654,7 @@ export default function App() {
             videoUrl: job.playbackUrl,
             activeVideoUrl: job.status === 'ready' && job.playbackUrl ? job.playbackUrl : current.activeVideoUrl,
             errorMessage: job.errorMessage,
+            lastMediaSyncAt: new Date().toISOString(),
           };
         });
       } catch (error) {
@@ -374,9 +677,37 @@ export default function App() {
   }, [currentScreen, user]);
 
   useEffect(() => {
+    if (currentScreen !== 'error-book' || !graphFocusedErrorId) return;
+
+    const target = errorCardRefs.current[graphFocusedErrorId];
+    if (!target) return;
+
+    const timeoutId = window.setTimeout(() => {
+      target.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    }, 120);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [currentScreen, errorFilter, graphFocusedErrorId, errorList.length]);
+
+  useEffect(() => {
     if (typeof window === 'undefined') return;
     window.localStorage.setItem('liezi-theater-cue-enabled', String(theaterCueEnabled));
   }, [theaterCueEnabled]);
+
+  useEffect(() => {
+    const refreshYufengTaskState = () => {
+      setYufengTaskState(getYufengDailyTaskState());
+    };
+
+    refreshYufengTaskState();
+    const unsubscribe = subscribeYufengDailyTaskUpdated(refreshYufengTaskState);
+    window.addEventListener('storage', refreshYufengTaskState);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('storage', refreshYufengTaskState);
+    };
+  }, []);
 
   const toggleTheaterCueEnabled = async () => {
     const nextValue = !theaterCueEnabled;
@@ -462,18 +793,21 @@ export default function App() {
   const loadErrors = async () => {
     if (demoMode) {
       setErrorList(DEMO_ERRORS);
+      void refreshKnowledgeGraph('demo-student');
       return;
     }
     if (!user) return;
     try {
       const errs = await getActiveErrors(user.uid);
       setErrorList(errs);
+      await refreshKnowledgeGraph(user.uid);
     } catch (e) {
       console.error(e);
     }
   };
 
   const enterDemoMode = () => {
+    setWelcomeError(null);
     setDemoMode(true);
     setGrade((prev) => prev || '四年级');
     setTargetScore(115);
@@ -483,6 +817,38 @@ export default function App() {
     setTaskStatus({});
     setTaskStatusDate(todayKey);
     setCurrentScreen('dashboard');
+    void refreshStudentStateSummary('demo-student');
+    void refreshKnowledgeGraph('demo-student');
+  };
+
+  const handleEnterCamp = async () => {
+    if (authChecking) return;
+
+    setWelcomeError(null);
+
+    try {
+      let currentUser = user;
+      if (!currentUser) {
+        const res = await loginWithGoogle();
+        currentUser = res.user;
+      }
+      const profile = await getUserProfile(currentUser.uid);
+      if (profile && profile.grade) {
+        setCurrentScreen('dashboard');
+      } else {
+        setCurrentScreen('profile-setup');
+      }
+    } catch (err) {
+      const message = err instanceof Error ? err.message : '';
+      const code = (err as { code?: string } | null)?.code ?? '';
+      if (code === 'auth/popup-blocked' || message.includes('popup-blocked')) {
+        enterDemoMode();
+        return;
+      }
+
+      console.error("Login Error:", err);
+      setWelcomeError('登录没有完成。可以重试进入营地，或先用 3 分钟 Demo 继续体验。');
+    }
   };
 
   const persistTaskStatus = async (nextStatus: Record<string, TaskStatusRecord>) => {
@@ -574,6 +940,84 @@ export default function App() {
     ? errorList
     : errorList.filter((errorItem) => getErrorMeta(errorItem).subject === errorFilter);
 
+  useEffect(() => {
+    if (currentScreen !== 'error-book') return;
+    if (!filteredErrors.length) {
+      setErrorExploreRecommendations({});
+      return;
+    }
+
+    let cancelled = false;
+
+    const loadRecommendations = async () => {
+      const {
+        getEngineByKey,
+        recommendExploreNodesForMistake,
+      } = await loadExploreRecommendationTools();
+      const nextRecommendations: Record<string, ErrorExploreRecommendation | null> = {};
+
+      filteredErrors.forEach((err, idx) => {
+        const cardId = err.id || `error-${idx}`;
+        const { subject, node } = getErrorMeta(err);
+        const exploreRecommendation = recommendExploreNodesForMistake({
+          mistakeKey: err.mistakeKey ?? err.mistakePatternKey,
+          mistakeCategory: err.mistakeCategory ?? err.category,
+          diagnosedMistakes: err.diagnosedMistakes,
+          subject,
+          node,
+          painPoint: err.painPoint,
+          rule: err.rule,
+          questionText: err.questionText,
+          summary: err.summary,
+        });
+        const primaryExploreNode = exploreRecommendation.primaryNode;
+        const primaryExploreEngine = primaryExploreNode
+          ? getEngineByKey(primaryExploreNode.engineKey)
+          : undefined;
+
+        nextRecommendations[cardId] =
+          exploreRecommendation.mapping && primaryExploreNode && primaryExploreEngine
+            ? {
+                mistakeTitle: exploreRecommendation.mapping.title,
+                mistakeDescription: exploreRecommendation.mapping.description,
+                repairAction: exploreRecommendation.mapping.repairAction,
+                primaryNode: {
+                  key: primaryExploreNode.key,
+                  label: primaryExploreNode.label,
+                  engineKey: primaryExploreNode.engineKey,
+                  engineTitle: primaryExploreEngine.title,
+                  engineSubtitle: primaryExploreEngine.subtitle,
+                  accentColor: primaryExploreEngine.accentColor,
+                },
+                secondaryNodes: exploreRecommendation.secondaryNodes.map((secondaryNode) => {
+                  const secondaryEngine = getEngineByKey(secondaryNode.engineKey);
+                  return {
+                    key: secondaryNode.key,
+                    label: secondaryNode.label,
+                    engineTitle: secondaryEngine?.title ?? secondaryNode.engineKey,
+                  };
+                }),
+              }
+            : null;
+      });
+
+      if (!cancelled) {
+        setErrorExploreRecommendations(nextRecommendations);
+      }
+    };
+
+    loadRecommendations().catch((error) => {
+      console.warn('Explore recommendation loading failed.', error);
+      if (!cancelled) {
+        setErrorExploreRecommendations({});
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [currentScreen, errorFilter, errorList]);
+
   const topMistakeCategory = (() => {
     const entries = Object.entries(studentStateSummary?.mistakeCategoryCounts ?? {});
     if (!entries.length) return null;
@@ -627,6 +1071,19 @@ export default function App() {
     { total: 0, zh: 0, ma: 0, en: 0 }
   );
 
+  const graphLinkedErrors: LinkedKnowledgeGraphError[] = errorList.map((errorItem, index) => {
+    const meta = getErrorMeta(errorItem);
+    return {
+      id: errorItem.id,
+      title: errorItem.painPoint || errorItem.rule || meta.node,
+      detail: errorItem.rule || errorItem.questionText || '等待补充错题上下文。',
+      subject: meta.subject,
+      subjectLabel: SUBJECT_META[meta.subject].short,
+      node: meta.node,
+      statusLabel: getErrorRecencyLabel(index),
+    };
+  });
+
   const stateDrivenError = (() => {
     const recentPainPoints = studentStateSummary?.recentPainPoints ?? [];
     for (const painPoint of recentPainPoints) {
@@ -642,36 +1099,92 @@ export default function App() {
     return errorList[0];
   })();
 
-  const preferredFocus = stateDrivenError
-    ? getErrorMeta(stateDrivenError)
-    : {
-        subject: (studentStateSummary?.recommendedSessionDefaults?.knowledgeActionType === 'sequence' ? 'en' : 'ma') as SubjectKey,
-        node: '',
+  const focusRecommendation: FocusRecommendation = (() => {
+    const recommendedDefaults = studentStateSummary?.recommendedSessionDefaults;
+    const recommendedText = [recommendedDefaults?.painPoint, recommendedDefaults?.rule]
+      .filter(Boolean)
+      .join(' ')
+      .trim();
+
+    if (recommendedText) {
+      const matchedError = errorList.find((errorItem) => {
+        const candidates = [errorItem.painPoint, errorItem.rule, errorItem.questionText]
+          .filter(Boolean)
+          .map((item: string) => item.toLowerCase());
+        const fragments = [recommendedDefaults?.painPoint, recommendedDefaults?.rule]
+          .filter(Boolean)
+          .map((item) => item!.toLowerCase());
+        return fragments.some((fragment) => candidates.some((candidate) => candidate.includes(fragment) || fragment.includes(candidate)));
+      });
+      const subject = inferSubjectFromText(recommendedText);
+      return {
+        matchedError,
+        subject,
+        node: inferKnowledgeNode(recommendedText, subject),
+        painPoint: recommendedDefaults?.painPoint,
+        rule: recommendedDefaults?.rule,
       };
-  const recommendedErrorId = stateDrivenError?.id;
+    }
+
+    if (stateDrivenError) {
+      const meta = getErrorMeta(stateDrivenError);
+      return {
+        matchedError: stateDrivenError,
+        subject: meta.subject,
+        node: meta.node,
+        painPoint: stateDrivenError.painPoint,
+        rule: stateDrivenError.rule,
+      };
+    }
+
+    const graphNode = [...(knowledgeGraph?.nodes ?? [])]
+      .sort((left, right) => right.weight - left.weight)[0];
+    if (graphNode) {
+      const subject = inferSubjectFromText(graphNode.label);
+      return {
+        subject,
+        node: graphNode.label,
+        painPoint: graphNode.label,
+      };
+    }
+
+    return {
+      subject: (studentStateSummary?.recommendedSessionDefaults?.knowledgeActionType === 'sequence' ? 'en' : 'ma') as SubjectKey,
+      node: '',
+    };
+  })();
+
+  const preferredFocus = {
+    subject: focusRecommendation.subject,
+    node: focusRecommendation.node,
+  };
+  const recommendedErrorId = focusRecommendation.matchedError?.id;
 
   const todayPlan: TaskCardData[] = (() => {
     const plan: TaskCardData[] = [];
     const expectedMinutes = Math.max(15, Math.ceil((targetScore - 85) * 1.5));
-    const topError = stateDrivenError;
+    const topError = focusRecommendation.matchedError;
+    const topSignal = focusRecommendation.rule || focusRecommendation.painPoint;
     const lastOutcome = studentStateSummary?.interactionStats.lastOutcome;
     const shouldProtect = lastOutcome === 'failure';
 
-    if (topError) {
-      const { subject, node } = getErrorMeta(topError);
+    if (topError || topSignal || preferredFocus.node) {
+      const subject = topError ? getErrorMeta(topError).subject : preferredFocus.subject;
+      const node = topError ? getErrorMeta(topError).node : preferredFocus.node;
+      const focusLabel = node || topSignal || '当前主线';
       plan.push({
         id: 'error-revive',
         subject,
-        title: shouldProtect ? `保护性重构：${node}` : `优先修复：${node}`,
+        title: shouldProtect ? `保护性重构：${focusLabel}` : `优先修复：${focusLabel}`,
         detail: shouldProtect
-          ? `最近一次裁决还没命中规则，先围绕“${topError.rule || topError.painPoint || '当前高频错点'}”收窄提示。`
-          : `先把“${topError.rule || topError.painPoint || '高频错点'}”修掉，立刻减少重复失分。`,
+          ? `最近一次裁决还没命中规则，先围绕“${topSignal || '当前高频错点'}”收窄提示。`
+          : `先把“${topSignal || '高频错点'}”修掉，立刻减少重复失分。`,
         mins: shouldProtect ? 10 : 8,
         xp: shouldProtect ? 20 : 18,
         status: taskStatus['error-revive']?.completed ? 'done' : 'urgent',
-        action: 'error',
+        action: topError ? 'error' : 'map',
         focusSubject: subject,
-        focusNode: node,
+        focusNode: node || undefined,
       });
     } else {
       plan.push({
@@ -757,24 +1270,125 @@ export default function App() {
       en: { textbook: textbooks.en, nodes: KNOWLEDGE_LIBRARY.en.map((name, index) => ({ name, progress: index < 2 ? 88 : 64 })) },
     };
 
-    return {
-      zh: fallback.zh.nodes.map((node) => ({
-        name: node.name,
-        progress: node.progress,
-        state: node.progress >= 80 ? 'mastered' : node.progress >= 45 ? 'learning' : 'locked',
-      })),
-      ma: fallback.ma.nodes.map((node) => ({
-        name: node.name,
-        progress: node.progress,
-        state: node.progress >= 80 ? 'mastered' : node.progress >= 45 ? 'learning' : 'locked',
-      })),
-      en: fallback.en.nodes.map((node) => ({
-        name: node.name,
-        progress: node.progress,
-        state: node.progress >= 80 ? 'mastered' : node.progress >= 45 ? 'learning' : 'locked',
-      })),
-    };
+    const recentPainPoints = studentStateSummary?.recentPainPoints ?? [];
+    const activeRules = studentStateSummary?.activeRules ?? [];
+
+    const graphDrivenBySubject = (['zh', 'ma', 'en'] as SubjectKey[]).reduce((acc, subject) => {
+      const subjectNodes = (knowledgeGraph?.nodes ?? [])
+        .filter((node) => inferSubjectFromText(node.label) === subject)
+        .sort((left, right) => right.weight - left.weight || right.lastSeenAt.localeCompare(left.lastSeenAt))
+        .slice(0, 6)
+        .map((node) => {
+          const appearsInPainPoint = recentPainPoints.some((item) => item.includes(node.label) || node.label.includes(item));
+          const appearsInRule = activeRules.some((item) => item.includes(node.label) || node.label.includes(item));
+          const riskPressure = (node.weight - 1) * 14 + (appearsInPainPoint ? 12 : 0) + (appearsInRule ? 8 : 0);
+          return {
+            name: node.label,
+            progress: clampMapProgress(84 - riskPressure, 28, 82),
+            state: 'learning' as const,
+            targetErrorId: resolveNodeTargetErrorId(subject, node.label, errorList),
+          };
+        });
+
+      acc[subject] = subjectNodes;
+      return acc;
+    }, { zh: [] as KnowledgeNode[], ma: [] as KnowledgeNode[], en: [] as KnowledgeNode[] });
+
+    return (['zh', 'ma', 'en'] as SubjectKey[]).reduce((acc, subject) => {
+      const merged = new Map<string, KnowledgeNode>();
+
+      for (const node of graphDrivenBySubject[subject]) {
+        merged.set(node.name, node);
+      }
+
+      for (const node of fallback[subject].nodes) {
+        if (merged.has(node.name)) continue;
+        merged.set(node.name, {
+          name: node.name,
+          progress: node.progress,
+          state: node.progress >= 80 ? 'mastered' : node.progress >= 45 ? 'learning' : 'locked',
+          targetErrorId: resolveNodeTargetErrorId(subject, node.name, errorList),
+        });
+      }
+
+      const prioritizedNodes = Array.from(merged.values()).sort((left, right) => {
+        if (left.name === preferredFocus.node) return -1;
+        if (right.name === preferredFocus.node) return 1;
+        if (left.state !== right.state) {
+          const statePriority = { learning: 0, mastered: 1, locked: 2 };
+          return statePriority[left.state] - statePriority[right.state];
+        }
+        return left.progress - right.progress;
+      });
+
+      acc[subject] = prioritizedNodes.slice(0, 6);
+      return acc;
+    }, {} as Record<SubjectKey, KnowledgeNode[]>);
   })();
+
+  const allKnowledgeNodes = (['zh', 'ma', 'en'] as SubjectKey[]).flatMap((subject) => knowledgeMap[subject]);
+  const masteredNodes = allKnowledgeNodes.filter((node) => node.state === 'mastered').length;
+  const learningNodes = allKnowledgeNodes.filter((node) => node.state === 'learning').length;
+  const successCount = studentStateSummary?.interactionStats.successCount ?? 0;
+  const failureCount = studentStateSummary?.interactionStats.failureCount ?? 0;
+  const currentCognitiveState = normalizeCognitiveState(studentStateSummary?.currentCognitiveState ?? cogState);
+  const currentCognitiveProjection = projectDashboardRadarState(currentCognitiveState);
+  const uniquePainPoints = Array.from(
+    new Set([
+      ...(studentStateSummary?.recentPainPoints ?? []),
+      ...errorList.map((item) => item.painPoint).filter(Boolean),
+    ]),
+  ).slice(0, 3);
+  const dashboardLoading = (studentStateSummaryStatus === 'loading' || knowledgeGraphStatus === 'loading')
+    && !studentStateSummary
+    && !knowledgeGraph;
+
+  const dashboardState: DashboardViewState = (() => {
+    return buildDashboardViewState({
+      targetScore,
+      timeSavedMinutes: timeSaved,
+      successCount,
+      failureCount,
+      activeIssuesCount: errorStats.total,
+      painPoints: uniquePainPoints,
+      cognitiveState: currentCognitiveState,
+    });
+  })();
+
+  const overviewState = (() => {
+    return buildOverviewViewState({
+      timeSavedMinutes: timeSaved,
+      masteredNodes,
+      learningNodes,
+      successCount,
+      failureCount,
+      activeIssueCount: errorStats.total,
+      cognitiveState: currentCognitiveState,
+      currentFocus: focusRecommendation.rule || focusRecommendation.painPoint || preferredFocus.node,
+      activeSignals: [
+        ...(studentStateSummary?.recentPainPoints ?? []),
+        ...(studentStateSummary?.activeRules ?? []),
+      ],
+    });
+  })();
+
+  const openErrorBookFocus = ({
+    subject,
+    node,
+    errorId,
+    source,
+  }: ErrorBookFocusContext) => {
+    setMapSubject(subject);
+    setErrorFilter(subject);
+    setGraphFocusedErrorId(errorId ?? null);
+    setErrorBookFocus({
+      subject,
+      node,
+      errorId: errorId ?? null,
+      source,
+    });
+    setCurrentScreen('error-book');
+  };
 
   const handleTaskAction = (task: TaskCardData) => {
     if (task.action === 'upload') {
@@ -793,6 +1407,19 @@ export default function App() {
       setCurrentScreen('subject-map');
       return;
     }
+
+    if (task.focusSubject && task.focusNode) {
+      openErrorBookFocus({
+        subject: task.focusSubject,
+        node: task.focusNode,
+        errorId: resolveNodeTargetErrorId(task.focusSubject, task.focusNode, errorList),
+        source: 'task',
+      });
+      return;
+    }
+
+    setErrorBookFocus(null);
+    setGraphFocusedErrorId(null);
     setErrorFilter(task.focusSubject ?? 'all');
     if (task.focusSubject) {
       setMapSubject(task.focusSubject);
@@ -800,23 +1427,44 @@ export default function App() {
     setCurrentScreen('error-book');
   };
 
-  const handleMapNodePress = (subject: SubjectKey, nodeName: string) => {
-    const matchedError = errorList.find((errorItem) => {
-      const meta = getErrorMeta(errorItem);
-      return meta.subject === subject && meta.node === nodeName;
+  const handleMapNodePress = (subject: SubjectKey, nodeName: string, targetErrorId?: string | null) => {
+    markTaskComplete('knowledge-map').catch((error) => console.error(error));
+    openErrorBookFocus({
+      subject,
+      node: nodeName,
+      errorId: targetErrorId ?? null,
+      source: 'map',
     });
+  };
 
-    setMapSubject(subject);
-    setErrorFilter(subject);
+  const handleGraphErrorFocus = (errorId: string) => {
+    const matchedError = errorList.find((errorItem) => errorItem.id === errorId);
+    if (!matchedError) return;
 
-    if (matchedError) {
-      setPracticeQueue([]);
-      setPracticeIndex(0);
-      generateCloneQuestion(matchedError);
-      return;
+    const meta = getErrorMeta(matchedError);
+    openErrorBookFocus({
+      subject: meta.subject,
+      node: meta.node,
+      errorId,
+      source: 'graph',
+    });
+  };
+
+  const handleSocraticReply = async () => {
+    const threadId = theaterMeta?.diagnosticThread?.id;
+    if (!threadId || !socraticReplyDraft.trim() || socraticReplyPending) return;
+
+    try {
+      setSocraticReplyPending(true);
+      const { replySocraticThread } = await loadMobiusApi();
+      const thread = await replySocraticThread(threadId, { content: socraticReplyDraft.trim() });
+      setTheaterMeta((current) => current ? { ...current, diagnosticThread: thread } : current);
+      setSocraticReplyDraft('');
+    } catch (error) {
+      console.error('Socratic reply failed.', error);
+    } finally {
+      setSocraticReplyPending(false);
     }
-
-    setCurrentScreen('error-book');
   };
 
   useEffect(() => {
@@ -837,6 +1485,7 @@ export default function App() {
       const mimeType = file.type;
       
       try {
+        const { analyzeQuestionImage } = await loadMobiusApi();
         const data = await analyzeQuestionImage({
           imageBase64: base64String,
           mimeType,
@@ -859,6 +1508,7 @@ export default function App() {
     setCombatAnswer('');
 
     try {
+      const { generateCloneQuestion: generateCloneQuestionViaApi } = await loadMobiusApi();
       const data = await generateCloneQuestionViaApi({
         painPoint: errorItem.painPoint,
         rule: errorItem.rule,
@@ -880,6 +1530,7 @@ export default function App() {
   };
 
   const generateFallbackTheaterScript = async (errorItem: any) => {
+    const { generateTheaterScript: generateTheaterScriptViaApi } = await loadMobiusApi();
     return generateTheaterScriptViaApi({
       painPoint: errorItem.painPoint,
       rule: errorItem.rule,
@@ -891,6 +1542,7 @@ export default function App() {
     setCurrentScreen('theater');
     setTheaterResolution(null);
     setTheaterMeta(null);
+    setSocraticReplyDraft('');
     setTheaterDecisionPending(false);
     setTheaterActionCompleted(true);
     setTheaterSelfCheck('aligned');
@@ -901,7 +1553,12 @@ export default function App() {
 
     try {
       const errorMeta = getErrorMeta(errorItem);
-      let contentResolution: Awaited<ReturnType<typeof resolveMobiusContent>> | null = null;
+      const {
+        createMobiusSession,
+        getMobiusStudentStateSummary,
+        resolveMobiusContent,
+      } = await loadMobiusApi();
+      let contentResolution: Awaited<ReturnType<MobiusApi['resolveMobiusContent']>> | null = null;
 
       try {
         contentResolution = await resolveMobiusContent({
@@ -918,11 +1575,12 @@ export default function App() {
 
       const storySeed = contentResolution?.recommendedStorySeed;
       const primaryKnowledgePoint = contentResolution?.matchedKnowledgePoints[0]?.knowledgePoint;
+      const primaryFoundationNode = contentResolution?.recommendedFoundationNodes?.[0];
       const relatedQuestionSummary = contentResolution?.relatedQuestions.slice(0, 2).map(({ question }) =>
         `${question.year} ${question.region} ${question.questionType}`,
       );
       const studentId = user?.uid || 'demo-student';
-      let stateSummary: Awaited<ReturnType<typeof getMobiusStudentStateSummary>> | null = null;
+      let stateSummary: Awaited<ReturnType<MobiusApi['getMobiusStudentStateSummary']>> | null = null;
 
       try {
         stateSummary = await getMobiusStudentStateSummary(studentId);
@@ -945,14 +1603,11 @@ export default function App() {
           storySeed?.knowledgeAction ??
           contentResolution?.errorRecord.knowledgeAction,
         timeSavedMinutes: timeSaved,
-        previousState: {
-          focus: stateSummary?.currentCognitiveState?.focus ?? sessionDefaults?.previousState.focus ?? cogState.focus,
-          frustration:
-            stateSummary?.currentCognitiveState?.frustration ??
-            sessionDefaults?.previousState.frustration ??
-            cogState.frustration,
-          joy: stateSummary?.currentCognitiveState?.joy ?? sessionDefaults?.previousState.joy ?? cogState.joy,
-        },
+        previousState: normalizeCognitiveState(
+          stateSummary?.currentCognitiveState
+          ?? sessionDefaults?.previousState
+          ?? cogState,
+        ),
         learningSignals: {
           attempts: 1,
           correctStreak: 0,
@@ -961,18 +1616,10 @@ export default function App() {
         },
       });
 
-      setCogState({
-        focus: mobiusSession.cognitiveState.focus,
-        frustration: mobiusSession.cognitiveState.frustration,
-        joy: mobiusSession.cognitiveState.joy,
-      });
+      setCogState(normalizeCognitiveState(mobiusSession.cognitiveState));
 
       if (user) {
-        await updateCognitiveState(user.uid, {
-          focus: mobiusSession.cognitiveState.focus,
-          frustration: mobiusSession.cognitiveState.frustration,
-          joy: mobiusSession.cognitiveState.joy,
-        });
+        await updateCognitiveState(user.uid, mobiusSession.cognitiveState);
       }
       void refreshStudentStateSummary(studentId);
 
@@ -995,35 +1642,31 @@ export default function App() {
         contentKnowledgePointTitle: primaryKnowledgePoint?.title,
         contentKnowledgePointGrade: primaryKnowledgePoint?.reference.grade,
         contentEvidence: contentResolution?.recommendedStorySeed.evidence.slice(0, 3),
+        foundationNodeKey: primaryFoundationNode?.node.key,
+        foundationNodeLabel: primaryFoundationNode?.node.label,
+        foundationNodeReason: primaryFoundationNode?.reasons[0],
         relatedQuestionSummary,
         diagnosedMistakeLabels: mobiusSession.errorProfile.diagnosedMistakes.map((item) => item.label),
         knowledgeActionLabel: mobiusSession.errorProfile.knowledgeAction.label,
         knowledgeActionType: mobiusSession.errorProfile.knowledgeAction.actionType,
         knowledgeActionId: mobiusSession.errorProfile.knowledgeAction.id,
+        strategyDecision: mobiusSession.strategyDecision ?? mobiusSession.story.strategyDecision,
+        lastMediaSyncAt: new Date().toISOString(),
       });
       setTheaterMode('playing');
       scheduleTheaterInteraction();
     } catch (mobiusError) {
-      console.warn('Mobius orchestration failed, falling back to Gemini.', mobiusError);
+      console.warn('Mobius orchestration failed, falling back to DeepSeek.', mobiusError);
 
       try {
-        const newCogState = {
-          focus: Math.min(100, cogState.focus + 20),
-          frustration: Math.min(100, cogState.frustration + 10),
-          joy: cogState.joy,
-        };
-        setCogState(newCogState);
-        if (user) {
-          await updateCognitiveState(user.uid, newCogState);
-        }
-
         const script = await generateFallbackTheaterScript(errorItem);
         setTheaterScript(script);
         setTheaterMeta({
-          source: 'gemini',
+          source: 'deepseek',
           provider: 'fallback',
           videoStatus: 'failed',
-          errorMessage: 'Mobius unavailable, using Gemini local fallback.',
+          errorMessage: 'Mobius unavailable, using DeepSeek local fallback.',
+          lastMediaSyncAt: new Date().toISOString(),
         });
         setTheaterMode('playing');
         scheduleTheaterInteraction();
@@ -1079,6 +1722,7 @@ export default function App() {
     if (theaterMeta?.source === 'mobius' && theaterMeta.mediaJobId) {
       try {
         setTheaterDecisionPending(true);
+        const { resolveMobiusInteraction } = await loadMobiusApi();
         const resolution = await resolveMobiusInteraction(theaterMeta.mediaJobId, {
           outcome,
           actionType: theaterMeta.knowledgeActionType ?? 'button-override',
@@ -1111,16 +1755,21 @@ export default function App() {
           nextActions: resolution.nextActions,
           resolutionTitle: resolution.title,
           branchOutcome: resolution.video?.branchOutcome ?? resolution.outcome,
+          strategyDecision: resolution.strategyDecision,
           adjudicationRationale: resolution.adjudication?.rationale,
+          diagnosticThread: resolution.diagnosticThread ?? current.diagnosticThread,
           errorMessage: undefined,
+          lastMediaSyncAt: new Date().toISOString(),
         } : current);
         setTheaterMode('resolution');
         void refreshStudentStateSummary(user?.uid || 'demo-student');
+        void refreshKnowledgeGraph(user?.uid || 'demo-student');
       } catch (error) {
         console.warn('Mobius interaction resolve failed, falling back to local resolution.', error);
         setTheaterMeta((current) => current ? {
           ...current,
           errorMessage: '交互裁决请求失败，已回退到本地分支结果。',
+          lastMediaSyncAt: new Date().toISOString(),
         } : current);
         setTheaterResolution(outcome);
         setTheaterMode('resolution');
@@ -1167,10 +1816,12 @@ export default function App() {
       const mimeType = file.type;
       
       try {
+        const { dehydrateHomework: dehydrateHomeworkViaApi } = await loadMobiusApi();
         const data = await dehydrateHomeworkViaApi({
           imageBase64: base64String,
           mimeType,
           targetScore,
+          studentId: user?.uid || (demoMode ? 'demo-student' : undefined),
         });
         setDehydrateData(data);
         setDehydrateMode('ready');
@@ -1197,108 +1848,107 @@ export default function App() {
       exit={{ opacity: 0, y: -20 }}
       className="absolute inset-0 w-full h-full overflow-y-auto welcome-aurora"
     >
-      <div className="absolute top-12 left-6 text-[var(--color-primary)] opacity-15 sm:left-12"><Zap size={72} /></div>
-      <div className="absolute bottom-32 right-4 text-[var(--color-secondary)] opacity-15 sm:right-10"><SparkleIcon size={96} /></div>
+      <div className="pointer-events-none absolute left-6 top-10 text-[var(--color-primary)]/20 sm:left-12">
+        <Zap size={84} />
+      </div>
+      <div className="pointer-events-none absolute bottom-24 right-6 text-[var(--color-secondary)]/20 sm:right-12">
+        <SparkleIcon size={104} />
+      </div>
       <div className="relative z-10 mx-auto flex min-h-full w-full max-w-6xl flex-col justify-center px-4 py-6 sm:px-8 sm:py-8">
-        <div className="desktop-shell-shadow overflow-hidden rounded-[36px] border border-white/70 bg-white/82 backdrop-blur-xl sm:rounded-[44px]">
-          <div className="grid min-h-[calc(100vh-3rem)] grid-cols-1 sm:min-h-0 lg:grid-cols-[minmax(0,1.05fr)_minmax(360px,0.95fr)]">
-            <div className="flex flex-col justify-between px-6 pb-8 pt-8 sm:px-10 sm:pb-10 sm:pt-10 lg:px-12 lg:py-12">
-              <div>
-                <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/8 px-4 py-2 text-sm font-bold text-[var(--color-primary)]">
+        <div className="desktop-shell-shadow overflow-hidden rounded-[36px] border border-white/80 bg-white/86 backdrop-blur-xl sm:rounded-[44px]">
+          <div className="grid min-h-[calc(100vh-3rem)] grid-cols-1 sm:min-h-0 lg:grid-cols-[minmax(0,1.06fr)_minmax(360px,0.94fr)]">
+            <div className="relative flex flex-col justify-between px-6 pb-8 pt-8 sm:px-10 sm:pb-10 sm:pt-10 lg:px-12 lg:py-12">
+              <div className="pointer-events-none absolute inset-x-0 top-0 h-40 bg-[radial-gradient(circle_at_16%_12%,rgba(61,123,255,0.14),transparent_42%),radial-gradient(circle_at_70%_10%,rgba(255,213,74,0.12),transparent_26%)]" />
+              <div className="relative">
+                <div className="wind-pill">
                   <BrainCircuit size={16} />
-                  长期学生状态已接入首页决策
+                  御风冒险已接入长期学习状态
                 </div>
-                <div className="mb-8 flex items-center gap-4">
+                <div className="mt-6 flex items-center gap-4">
                   <motion.div 
-                    animate={{ rotate: [0, -5, 5, 0] }}
+                    animate={{ rotate: [0, -5, 4, 0], y: [0, -4, 0] }}
                     transition={{ duration: 5, repeat: Infinity, ease: 'easeInOut' }}
-                    className="flex h-20 w-20 items-center justify-center rounded-[28px] border-4 border-[#1a1a2e] bg-white shadow-[4px_4px_0_#1a1a2e] sm:h-24 sm:w-24"
+                    className="wind-sparkle-ring flex h-20 w-20 items-center justify-center rounded-[28px] border-4 border-[#1a1a2e] bg-white shadow-[0_18px_28px_rgba(61,123,255,0.16)] sm:h-24 sm:w-24"
                   >
                     <img src="https://api.dicebear.com/7.x/bottts/svg?seed=liezi-yufeng" alt="列子御风 AI 伙伴" className="h-14 w-14 sm:h-16 sm:w-16" />
                   </motion.div>
                   <div className="text-left">
                     <p className="text-sm font-black uppercase tracking-[0.24em] text-gray-400">Liezi Yufeng</p>
-                    <p className="text-base font-bold text-[#1a1a2e] sm:text-lg">把“刷题”变成可积累的认知修复</p>
+                    <p className="text-base font-bold text-[#1a1a2e] sm:text-lg">把刷题改造成有奖励的闯关旅程</p>
                   </div>
                 </div>
 
-                <h1 className="max-w-2xl text-left text-4xl font-display font-bold leading-[1.05] text-[#1a1a2e] sm:text-5xl lg:text-6xl">
-                  今天先拿回
+                <h1 className="mt-8 max-w-2xl text-left text-4xl font-display font-bold leading-[1.03] text-[#1a1a2e] sm:text-5xl lg:text-6xl">
+                  让今天的提分主线
                   <br />
-                  <span className="text-[var(--color-primary)]">最值的分。</span>
+                  <span className="text-[var(--color-primary)]">像玩冒险游戏一样推进。</span>
                 </h1>
 
                 <p className="mt-5 max-w-2xl text-left text-base font-medium leading-7 text-gray-600 sm:text-lg">
-                  系统先用长期状态判断你最近最容易失手的规则和痛点，再把首页任务、知识图谱焦点和剧场修复路径全部对齐到同一条主线。
+                  列子御风会先判断你最近最容易失手的规则和痛点，再把首页任务、知识地图、错题修复和剧场演练都串成同一条主线，减少分心，放大奖励感。
                 </p>
 
                 <div className="mt-8 grid gap-3 sm:grid-cols-3">
-                  {WELCOME_OUTCOMES.map((item) => (
-                    <div key={item.label} className="rounded-[24px] border border-[#1a1a2e]/10 bg-white/80 px-4 py-4 text-left shadow-[0_14px_30px_rgba(61,123,255,0.08)]">
-                      <p className="text-xs font-black uppercase tracking-[0.18em] text-gray-400">{item.label}</p>
-                      <p className={`mt-2 text-base font-black leading-6 ${item.accent}`}>{item.value}</p>
+                  {WELCOME_OUTCOMES.map((item, index) => (
+                    <div key={item.label} className="wind-quest-card px-4 py-4 text-left">
+                      <div className="flex items-center justify-between gap-2">
+                        <p className="text-xs font-black uppercase tracking-[0.18em] text-gray-400">{item.label}</p>
+                        <span className="wind-mini-badge bg-[var(--color-accent-yellow)]/30 text-[#7a4b00]">Lv.{index + 1}</span>
+                      </div>
+                      <p className={`mt-3 text-base font-black leading-6 ${item.accent}`}>{item.value}</p>
                     </div>
                   ))}
                 </div>
               </div>
 
-              <div className="mt-10 flex w-full flex-col gap-4 sm:max-w-xl">
+              <div className="relative mt-10 flex w-full flex-col gap-4 sm:max-w-xl">
                 <button 
-                  onClick={async () => {
-                    try {
-                      let currentUser = user;
-                      if (!currentUser) {
-                        const res = await loginWithGoogle();
-                        currentUser = res.user;
-                      }
-                      const profile = await getUserProfile(currentUser.uid);
-                      if (profile && profile.grade) {
-                        setCurrentScreen('dashboard');
-                      } else {
-                        setCurrentScreen('profile-setup');
-                      }
-                    } catch (err) {
-                      console.error("Login Error:", err);
-                    }
-                  }}
-                  className="game-btn w-full bg-[var(--color-primary)] py-4 text-lg text-white sm:text-xl flex items-center justify-center gap-2"
+                  onClick={handleEnterCamp}
+                  disabled={authChecking}
+                  className="game-btn flex w-full items-center justify-center gap-2 bg-[linear-gradient(180deg,#4d8dff_0%,#2b5bde_100%)] py-4 text-lg text-white sm:text-xl"
                 >
-                  <Play fill="currentColor" size={24} /> {authChecking ? '连接中...' : '建立档案并诊断'}
+                  <Play fill="currentColor" size={24} /> {authChecking ? '连接风场中...' : '进入御风营地'}
                 </button>
+
+                {welcomeError ? (
+                  <div className="rounded-2xl border border-[var(--color-secondary)]/20 bg-[rgba(255,138,61,0.12)] px-4 py-3 text-sm font-bold leading-6 text-[#7a3d00]">
+                    {welcomeError}
+                  </div>
+                ) : null}
 
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                   <button
                     onClick={() => setCurrentScreen('overview')}
-                    className="flex items-center justify-center gap-2 rounded-full border border-[#1a1a2e]/10 bg-white px-5 py-3 font-bold text-gray-600 transition-colors hover:bg-gray-100"
+                    className="game-btn flex items-center justify-center gap-2 border border-white/40 bg-white/92 px-5 py-3 font-bold text-gray-700 shadow-[0_10px_22px_rgba(39,67,145,0.08)]"
                   >
-                    <Clock size={18} /> 看看我省回多少时间
+                    <Clock size={18} /> 先看看战利品
                   </button>
                   <button
                     onClick={enterDemoMode}
-                    className="flex items-center justify-center gap-2 rounded-full border border-[var(--color-primary)]/20 bg-[var(--color-primary)]/10 px-5 py-3 font-bold text-[var(--color-primary)] transition-colors hover:bg-[var(--color-primary)]/15"
+                    className="game-btn flex items-center justify-center gap-2 bg-[linear-gradient(180deg,#ffd86c_0%,#ffb52f_100%)] px-5 py-3 font-bold text-[#6a4200] shadow-[0_12px_20px_rgba(255,181,47,0.18)]"
                   >
-                    <Zap size={18} /> 直接体验 Demo
+                    <Zap size={18} /> 试玩 3 分钟 Demo
                   </button>
                 </div>
               </div>
             </div>
 
-            <div className="relative border-t border-[#1a1a2e]/8 bg-[linear-gradient(180deg,rgba(31,34,68,0.98),rgba(22,24,48,1))] px-5 py-6 text-white sm:px-8 sm:py-8 lg:border-l lg:border-t-0">
-              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(61,123,255,0.2),transparent_36%),radial-gradient(circle_at_bottom_right,rgba(255,138,61,0.18),transparent_34%)]" />
+            <div className="relative border-t border-[#1a1a2e]/8 bg-[linear-gradient(180deg,#21315f_0%,#293b7d_52%,#3d2e72_100%)] px-5 py-6 text-white sm:px-8 sm:py-8 lg:border-l lg:border-t-0">
+              <div className="absolute inset-0 bg-[radial-gradient(circle_at_top,rgba(125,211,252,0.22),transparent_34%),radial-gradient(circle_at_bottom_right,rgba(255,138,61,0.18),transparent_30%)]" />
               <div className="relative flex h-full flex-col">
-                <div className="mb-5 flex items-center justify-between">
+                <div className="mb-5 flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-200/70">Command Preview</p>
-                    <h2 className="mt-2 text-2xl font-black text-white">今天的主线会如何被生成</h2>
+                    <p className="text-xs font-black uppercase tracking-[0.24em] text-cyan-200/70">World Preview</p>
+                    <h2 className="mt-2 text-2xl font-black text-white">今天的冒险地图会怎么生成</h2>
                   </div>
                   <div className="rounded-full border border-white/10 bg-white/10 px-3 py-1 text-xs font-bold text-cyan-100">
-                    state-summary online
+                    主线已锁定
                   </div>
                 </div>
 
                 <div className="space-y-3">
                   {WELCOME_SIGNALS.map(({ icon: Icon, title, detail, tone }) => (
-                    <div key={title} className="rounded-[26px] border border-white/10 bg-white/6 p-4 backdrop-blur-sm">
+                    <div key={title} className="rounded-[26px] border border-white/10 bg-white/8 p-4 backdrop-blur-sm shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
                       <div className="flex items-start gap-3">
                         <div className={`mt-1 flex h-11 w-11 items-center justify-center rounded-2xl ${tone}`}>
                           <Icon size={20} />
@@ -1312,31 +1962,35 @@ export default function App() {
                   ))}
                 </div>
 
-                <div className="mt-5 rounded-[28px] border border-cyan-300/16 bg-black/18 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
-                  <div className="mb-4 flex items-center justify-between">
+                <div className="mt-5 rounded-[30px] border border-white/12 bg-black/18 p-5 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+                  <div className="mb-4 flex items-center justify-between gap-3">
                     <div>
-                      <p className="text-xs font-black uppercase tracking-[0.22em] text-cyan-200/70">AI 主线预览</p>
+                      <p className="text-xs font-black uppercase tracking-[0.22em] text-cyan-200/70">今日首个关卡</p>
                       <h3 className="mt-2 text-xl font-black">数学 · 几何辅助线</h3>
                     </div>
                     <div className="rounded-full bg-[var(--color-secondary)] px-3 py-1 text-xs font-black text-[#1a1a2e]">
-                      今日优先
+                      Boss 点位
                     </div>
                   </div>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
-                      <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">最近痛点</p>
+                    <div className="rounded-2xl border border-white/10 bg-white/8 p-4">
+                      <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">最近失手</p>
                       <p className="mt-2 text-base font-bold text-white">几何中点辅助线选择失误</p>
                     </div>
-                    <div className="rounded-2xl border border-white/10 bg-white/6 p-4">
-                      <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">系统动作</p>
-                      <p className="mt-2 text-base font-bold text-white">先错题重构，再剧场分支演练</p>
+                    <div className="rounded-2xl border border-white/10 bg-white/8 p-4">
+                      <p className="text-xs font-black uppercase tracking-[0.2em] text-slate-400">推荐路线</p>
+                      <p className="mt-2 text-base font-bold text-white">先错题修复，再进剧场挑战</p>
                     </div>
                   </div>
                   <div className="mt-4 flex items-center gap-3 rounded-2xl border border-[var(--color-secondary)]/20 bg-[var(--color-secondary)]/12 p-4">
                     <Target size={18} className="text-[var(--color-secondary)]" />
                     <p className="text-sm font-bold leading-6 text-orange-50">
-                      不是多做，而是先做“刚好击中风险型”的那一步。
+                      不是多做题，而是先打掉今天最会掉血的那一个点。
                     </p>
+                  </div>
+                  <div className="mt-4 flex items-center gap-2 text-xs font-bold text-cyan-100">
+                    <Star size={14} className="text-[var(--color-accent-yellow)]" />
+                    完成主线后会同步点亮知识地图、错题图鉴和战报结算。
                   </div>
                 </div>
               </div>
@@ -1353,68 +2007,90 @@ export default function App() {
       initial={{ opacity: 0, x: 20 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -20 }}
-      className="absolute inset-0 w-full h-full flex flex-col bg-gray-50 p-6 z-10"
+      className="wind-page absolute inset-0 z-10 flex h-full w-full min-h-0 flex-col p-5 sm:p-6"
     >
-      <h2 className="text-3xl font-display font-bold text-[#1a1a2e] mb-2 mt-8">建立控分档案</h2>
-      <p className="text-gray-500 font-bold mb-8">我们需要你的当前学段与教材版本，以精准匹配全国真题树。</p>
-      
-      <div className="space-y-8 flex-1 overflow-y-auto pb-6">
-        {/* 年级选择 */}
-        <div>
-          <h3 className="font-bold text-lg mb-3">在读年级</h3>
-          <div className="grid grid-cols-3 gap-2">
-            {['三年级', '四年级', '五年级', '六年级', '七年级', '八年级', '九年级'].map(g => (
-              <button 
-                key={g}
-                onClick={() => setGrade(g)}
-                className={`py-2 px-3 rounded-xl border-2 font-bold text-sm transition-all ${
-                  grade === g 
-                    ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)] shadow-[2px_2px_0_var(--color-primary)]' 
-                    : 'border-gray-200 text-gray-500 hover:border-gray-300'
-                }`}
-              >
-                {g}
-              </button>
-            ))}
+      <div className="wind-panel mt-2 flex flex-1 min-h-0 flex-col px-5 pb-5 pt-6 sm:px-6 sm:pt-7">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <div className="wind-pill">
+              <MapIcon size={16} />
+              第 1 步 / 建立冒险档案
+            </div>
+            <h2 className="mt-4 text-3xl font-display font-bold text-[#1a1a2e]">先告诉我，你现在在哪一张地图</h2>
+            <p className="mt-2 text-sm font-bold leading-6 text-gray-500">
+              我会根据年级与教材版本，给你匹配对应的闯关路线、知识节点和剧场脚本，不会动你的核心学习模块。
+            </p>
+          </div>
+          <div className="hidden rounded-[24px] bg-[linear-gradient(180deg,rgba(61,123,255,0.14),rgba(255,213,74,0.16))] p-3 text-[var(--color-primary)] sm:block">
+            <SparkleIcon className="h-8 w-8" />
           </div>
         </div>
-
-        {/* 教材版本 */}
-        <div>
-          <h3 className="font-bold text-lg mb-3">三科教材版本</h3>
-          <div className="space-y-3">
-            {[{id: 'zh', name: '丹青语文', color: 'var(--color-subj-zh)', opts: ['部编版(人教)', '苏教版', '语文版']}, 
-              {id: 'ma', name: '极光数学', color: 'var(--color-subj-ma)', opts: ['人教版', '北师大版', '苏教版']}, 
-              {id: 'en', name: '阳光英语', color: 'var(--color-subj-en)', opts: ['人教PEP', '外研社', '牛津版']}].map(subj => (
-              <div key={subj.id} className="flex items-center justify-between bg-white p-3 rounded-2xl border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e]">
-                <div className="flex items-center gap-2">
-                  <div className={`w-3 h-3 rounded-full`} style={{backgroundColor: subj.color}}></div>
-                  <span className="font-bold text-[#1a1a2e]">{subj.name}</span>
-                </div>
-                <select 
-                  className="bg-gray-50 border-2 border-gray-200 rounded-lg px-2 py-1 font-bold text-sm outline-none focus:border-[var(--color-primary)]"
-                  value={textbooks[subj.id as keyof typeof textbooks]}
-                  onChange={(e) => setTextbooks({...textbooks, [subj.id]: e.target.value})}
+        
+        <div className="mt-6 flex-1 min-h-0 space-y-6 overflow-y-auto pb-4 touch-pan-y">
+          <div className="game-card p-4 sm:p-5">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="text-lg font-black text-[#1a1a2e]">选择当前年级</h3>
+              <span className="wind-mini-badge bg-[var(--color-primary)]/12 text-[var(--color-primary)]">角色等级</span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {['三年级', '四年级', '五年级', '六年级', '七年级', '八年级', '九年级'].map(g => (
+                <button 
+                  key={g}
+                  onClick={() => setGrade(g)}
+                  className={`rounded-2xl border px-3 py-3 text-sm font-black transition-all ${
+                    grade === g 
+                      ? 'border-[var(--color-primary)] bg-[linear-gradient(180deg,rgba(61,123,255,0.16),rgba(61,123,255,0.08))] text-[var(--color-primary)] shadow-[0_12px_20px_rgba(61,123,255,0.12)]' 
+                      : 'border-[#dce6ff] bg-white text-gray-500 hover:border-[#bdd2ff]'
+                  }`}
                 >
-                  {subj.opts.map(opt => <option key={opt} value={opt}>{opt}</option>)}
-                </select>
-              </div>
-            ))}
+                  {g}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="game-card p-4 sm:p-5">
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <h3 className="text-lg font-black text-[#1a1a2e]">选择三科教材</h3>
+              <span className="wind-mini-badge bg-[var(--color-secondary)]/12 text-[var(--color-secondary)]">世界规则</span>
+            </div>
+            <div className="space-y-3">
+              {[{id: 'zh', name: '丹青语文', color: 'var(--color-subj-zh)', opts: ['部编版(人教)', '苏教版', '语文版']}, 
+                {id: 'ma', name: '极光数学', color: 'var(--color-subj-ma)', opts: ['人教版', '北师大版', '苏教版']}, 
+                {id: 'en', name: '阳光英语', color: 'var(--color-subj-en)', opts: ['人教PEP', '外研社', '牛津版']}].map(subj => (
+                <div key={subj.id} className="wind-quest-card flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="flex items-center gap-3">
+                    <div className="h-4 w-4 rounded-full border-2 border-white shadow-sm" style={{ backgroundColor: subj.color }} />
+                    <div>
+                      <p className="font-black text-[#1a1a2e]">{subj.name}</p>
+                      <p className="text-xs font-bold text-gray-400">决定对应题库与地图节点</p>
+                    </div>
+                  </div>
+                  <select 
+                    className="wind-select max-w-[150px] text-sm"
+                    value={textbooks[subj.id as keyof typeof textbooks]}
+                    onChange={(e) => setTextbooks({...textbooks, [subj.id]: e.target.value})}
+                  >
+                    {subj.opts.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+                  </select>
+                </div>
+              ))}
+            </div>
           </div>
         </div>
-      </div>
 
-      <button 
-        disabled={!grade}
-        onClick={async () => {
-          await saveProfileData({ grade, textbooks });
-          setCurrentScreen('diagnostic-loading');
-          setTimeout(() => setCurrentScreen('target-setter'), 3000);
-        }}
-        className="game-btn bg-[var(--color-primary)] text-white w-full py-4 text-xl flex justify-center items-center gap-2 mt-auto"
-      >
-        <MapIcon size={24} /> 开始极速诊断
-      </button>
+        <button 
+          disabled={!grade}
+          onClick={async () => {
+            await saveProfileData({ grade, textbooks });
+            setCurrentScreen('diagnostic-loading');
+            setTimeout(() => setCurrentScreen('target-setter'), 3000);
+          }}
+          className="game-btn mt-4 flex w-full items-center justify-center gap-2 bg-[linear-gradient(180deg,#4d8dff_0%,#2b5bde_100%)] py-4 text-xl text-white"
+        >
+          <MapIcon size={24} /> 启动第一次巡航诊断
+        </button>
+      </div>
     </motion.div>
   );
 
@@ -1424,28 +2100,33 @@ export default function App() {
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
       exit={{ opacity: 0 }}
-      className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-[var(--color-primary)] text-white"
+      className="absolute inset-0 flex h-full w-full flex-col items-center justify-center overflow-hidden bg-[linear-gradient(180deg,#2a4cc6_0%,#355ce2_42%,#5d79ea_100%)] px-6 text-white"
     >
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_18%_18%,rgba(255,255,255,0.22),transparent_22%),radial-gradient(circle_at_78%_14%,rgba(255,213,74,0.16),transparent_20%),radial-gradient(circle_at_50%_80%,rgba(255,255,255,0.14),transparent_26%)]" />
+      <div className="relative z-10 mb-4 rounded-full border border-white/18 bg-white/10 px-4 py-2 text-[11px] font-black uppercase tracking-[0.18em] text-cyan-100">
+        风场校准中
+      </div>
       <motion.div
         animate={{ rotate: 360, scale: [1, 1.1, 1] }}
         transition={{ duration: 1.5, repeat: Infinity }}
+        className="relative z-10"
       >
         <BrainCircuit size={64} />
       </motion.div>
-      <h2 className="text-2xl font-display font-bold mt-6 tracking-wider">列子御风 AI 演算中</h2>
+      <h2 className="relative z-10 mt-6 text-center text-3xl font-display font-bold tracking-wider">正在为你拼接今天的主线地图</h2>
       
-      <div className="mt-8 space-y-3 w-64">
+      <div className="relative z-10 mt-8 w-72 space-y-3 rounded-[28px] border border-white/12 bg-white/10 p-5 backdrop-blur-sm">
         {[
-          { text: "扫描本地高频考点核心库...", delay: 0 },
-          { text: "比对近 3 年期末真题概率...", delay: 0.8 },
-          { text: "构建最小学习成本图谱...", delay: 1.6 }
+          { text: "扫描你当前学段的核心关卡...", delay: 0 },
+          { text: "比对近 3 年高频考点的掉分点...", delay: 0.8 },
+          { text: "生成最短提分与修复路线...", delay: 1.6 }
         ].map((item, i) => (
           <motion.div
             key={i}
             initial={{ opacity: 0, x: -10 }}
             animate={{ opacity: 1, x: 0 }}
             transition={{ delay: item.delay }}
-            className="flex items-center gap-2 text-sm font-bold opacity-80"
+            className="flex items-center gap-2 text-sm font-bold opacity-90"
           >
             <Check size={16} /> {item.text}
           </motion.div>
@@ -1466,320 +2147,118 @@ export default function App() {
         initial={{ opacity: 0, scale: 0.95 }}
         animate={{ opacity: 1, scale: 1 }}
         exit={{ opacity: 0, y: 20 }}
-        className="absolute inset-0 w-full h-full flex flex-col bg-gray-50 p-6 z-10"
+        className="wind-page absolute inset-0 z-10 flex h-full w-full min-h-0 flex-col p-5 sm:p-6"
       >
-        <div className="flex items-center gap-2 mt-4 mb-2">
-          <Sliders className="text-[var(--color-primary)]" />
-          <h2 className="text-3xl font-display font-bold text-[#1a1a2e]">自由控分盘</h2>
-        </div>
-        <p className="text-gray-500 font-bold mb-8">AI 将为你计算达到目标分数的<span className="text-[var(--color-secondary)]">最短路径</span></p>
-        
-        {/* Slider Area */}
-        <div className="bg-white p-6 rounded-[32px] border-4 border-[#1a1a2e] shadow-[4px_4px_0_#1a1a2e] mb-8">
-          <div className="flex justify-between items-end mb-6">
-            <span className="text-sm font-bold text-gray-400">设置你的目标</span>
-            <span className="text-5xl font-display font-bold text-[var(--color-primary)] tracking-tight">
-              {targetScore}<span className="text-lg text-gray-400 ml-1">/150</span>
-            </span>
-          </div>
-          
-          <input 
-            type="range" 
-            min={85} 
-            max={145} 
-            value={targetScore} 
-            onChange={(e) => setTargetScore(Number(e.target.value))}
-            className="w-full appearance-none h-4 rounded-full bg-gray-200 border-2 border-[#1a1a2e] outline-none cursor-pointer"
-            style={{ backgroundImage: `linear-gradient(to right, var(--color-primary) ${(targetScore - 85) / 60 * 100}%, transparent 0)` }}
-          />
-          
-          <div className="flex justify-between mt-3 text-xs font-bold text-gray-400">
-            <span>85 (当前水平)</span>
-            <span>150 满分</span>
-          </div>
-        </div>
-
-        {/* AI Prediction Area */}
-        <div className="game-card p-5 mb-auto relative overflow-hidden bg-[#1a1a2e] text-white border-0">
-          <div className="absolute top-0 right-0 p-4 opacity-10"><Cpu size={100} /></div>
-          
-          <div className="flex items-center gap-2 mb-6 relative z-10">
-            <SparkleIcon className="text-[var(--color-accent-green)] w-6 h-6" />
-            <h3 className="font-bold text-lg">AI 路径动态重组</h3>
-          </div>
-          
-          <div className="space-y-4 relative z-10">
-            <div className="flex justify-between items-center border-b border-white/10 pb-3">
-              <span className="text-gray-400 font-medium">净提分需求</span>
-              <span className="font-bold text-xl text-white">+{ptsNeeded} 分</span>
+        <div className="wind-panel mt-2 flex flex-1 min-h-0 flex-col px-5 pb-5 pt-6 sm:px-6 sm:pt-7">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <div className="wind-pill">
+                <Sliders size={16} />
+                第 2 步 / 设定今天终点
+              </div>
+              <h2 className="mt-4 text-3xl font-display font-bold text-[#1a1a2e]">告诉我你今天想打到哪一关</h2>
+              <p className="mt-2 text-sm font-bold text-gray-500">
+                AI 会把目标分拆成可以一步步完成的小任务，不删核心模块，只调整出击顺序和奖励节奏。
+              </p>
             </div>
-            <div className="flex justify-between items-center border-b border-white/10 pb-3">
-              <span className="text-gray-400 font-medium">需攻克高频考点</span>
-              <motion.span 
+            <div className="hidden rounded-[24px] bg-[linear-gradient(180deg,rgba(255,138,61,0.16),rgba(255,213,74,0.2))] p-3 text-[var(--color-secondary)] sm:block">
+              <Trophy size={28} />
+            </div>
+          </div>
+
+          <div className="mt-6 wind-quest-card px-5 py-5">
+            <div className="mb-6 flex items-end justify-between gap-4">
+              <div>
+                <p className="text-sm font-black uppercase tracking-[0.16em] text-gray-400">今日目标分</p>
+                <p className="mt-2 text-sm font-bold text-gray-500">向右拖动，决定今天的挑战终点。</p>
+              </div>
+              <span className="text-5xl font-display font-bold tracking-tight text-[var(--color-primary)]">
+                {targetScore}<span className="ml-1 text-lg text-gray-400">/150</span>
+              </span>
+            </div>
+            
+            <input 
+              type="range" 
+              min={85} 
+              max={145} 
+              value={targetScore} 
+              onChange={(e) => setTargetScore(Number(e.target.value))}
+              className="wind-slider h-4 w-full cursor-pointer appearance-none rounded-full bg-[#dbe8ff] outline-none"
+              style={{ backgroundImage: `linear-gradient(to right, var(--color-primary) ${(targetScore - 85) / 60 * 100}%, #dbe8ff 0)` }}
+            />
+            
+            <div className="mt-3 flex justify-between text-xs font-black text-gray-400">
+              <span>85 当前基线</span>
+              <span>145 冲刺上限</span>
+            </div>
+          </div>
+
+          <div className="mt-5 mb-auto grid grid-cols-2 gap-3">
+            <div className="game-card bg-[linear-gradient(180deg,#22305b_0%,#283b75_100%)] p-4 text-white border-0">
+              <div className="mb-3 flex items-center gap-2 text-cyan-100">
+                <SparkleIcon className="h-5 w-5" />
+                <p className="text-sm font-black">路径重组</p>
+              </div>
+              <p className="text-sm font-bold text-slate-300">净提分需求</p>
+              <p className="mt-2 text-3xl font-black text-white">+{ptsNeeded}</p>
+              <p className="mt-2 text-xs font-bold text-slate-400">分数越高，主线越需要聚焦高价值节点。</p>
+            </div>
+
+            <div className="game-card bg-[linear-gradient(180deg,#fff6ea_0%,#fffef9_100%)] p-4">
+              <div className="mb-2 flex items-center gap-2 text-[var(--color-secondary)]">
+                <Star size={18} />
+                <p className="text-sm font-black">关卡数量</p>
+              </div>
+              <motion.p 
                 key={tasksNeeded} 
-                initial={{ scale: 1.5, color: '#FF8A3D' }} 
-                animate={{ scale: 1, color: '#FF8A3D' }} 
-                className="font-bold text-2xl text-[var(--color-secondary)] inline-block"
+                initial={{ scale: 1.15 }}
+                animate={{ scale: 1 }}
+                className="text-3xl font-black text-[var(--color-secondary)]"
               >
                 {tasksNeeded} 个
-              </motion.span>
+              </motion.p>
+              <p className="mt-2 text-xs font-bold text-gray-500">这是今晚需要真正打透的高频考点数。</p>
             </div>
-            <div className="flex justify-between items-center border-b border-white/10 pb-3">
-              <span className="text-gray-400 font-medium">预计总耗时</span>
-              <motion.span 
+
+            <div className="game-card bg-[linear-gradient(180deg,#ebfff7_0%,#fafffd_100%)] p-4">
+              <div className="mb-2 flex items-center gap-2 text-[var(--color-accent-green)]">
+                <Clock size={18} />
+                <p className="text-sm font-black">预计耗时</p>
+              </div>
+              <motion.p 
                 key={timeNeeded} 
-                initial={{ scale: 1.5, color: '#33D1A0' }} 
-                animate={{ scale: 1, color: '#33D1A0' }} 
-                className="font-bold text-2xl text-[var(--color-accent-green)] inline-block"
+                initial={{ scale: 1.15 }}
+                animate={{ scale: 1 }}
+                className="text-3xl font-black text-[var(--color-accent-green)]"
               >
                 {timeNeeded} 分钟
-              </motion.span>
+              </motion.p>
+              <p className="mt-2 text-xs font-bold text-gray-500">把时间留给真正能涨分的主线关卡。</p>
             </div>
-            <div className="flex justify-between items-center">
-              <span className="text-gray-400 font-medium">AI 命中率预估</span>
-              <span className="font-bold text-xl text-white">96.8%</span>
+
+            <div className="game-card bg-[linear-gradient(180deg,#f7f3ff_0%,#fff9ff_100%)] p-4">
+              <div className="mb-2 flex items-center gap-2 text-[var(--color-accent-pink)]">
+                <Cpu size={18} />
+                <p className="text-sm font-black">路线命中率</p>
+              </div>
+              <p className="text-3xl font-black text-[var(--color-accent-pink)]">96.8%</p>
+              <p className="mt-2 text-xs font-bold text-gray-500">会优先安排最稳、最短、最容易获得正反馈的任务。</p>
             </div>
           </div>
-        </div>
 
-        <button 
-          onClick={async () => {
-             await saveProfileData({ targetScore });
-             setCurrentScreen('dashboard');
-          }}
-          className="game-btn bg-[var(--color-primary)] text-white w-full py-4 text-xl flex justify-center items-center gap-2 mt-6"
-        >
-          <MapIcon fill="currentColor" size={24} /> 生成最短提分路径
-        </button>
+          <button 
+            onClick={async () => {
+               await saveProfileData({ targetScore });
+               setCurrentScreen('dashboard');
+            }}
+            className="game-btn mt-6 flex w-full items-center justify-center gap-2 bg-[linear-gradient(180deg,#4d8dff_0%,#2b5bde_100%)] py-4 text-xl text-white"
+          >
+            <MapIcon fill="currentColor" size={24} /> 生成今日主线地图
+          </button>
+        </div>
       </motion.div>
     );
   };
-
-  const renderDashboard = () => (
-    <motion.div 
-      key="dash"
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      className="absolute inset-0 w-full h-full flex flex-col bg-gray-50 pb-24"
-    >
-      <div className="bg-[var(--color-primary)] text-white p-6 pt-10 rounded-b-[40px] shadow-lg border-b-4 border-[#1a1a2e] relative z-10">
-        <div className="flex justify-between items-center mb-6">
-          <div className="flex items-center gap-3">
-            <div className="bg-white p-1 rounded-full border-2 border-[#1a1a2e]">
-              <img src={user?.photoURL || "https://api.dicebear.com/7.x/notionists/svg?seed=Alex"} alt="Avatar" className="w-10 h-10 rounded-full" />
-            </div>
-            <div>
-              <h2 className="font-bold text-lg leading-tight">{user ? user.displayName?.split(' ')[0] : 'Alex'} 的列子风场 {grade ? `· ${grade}` : ''}</h2>
-              <p className="text-xs font-bold text-white/80">今日只做最值当的题</p>
-            </div>
-          </div>
-          <div className="flex gap-2 items-center">
-            <div className="bg-white/20 px-3 py-1 rounded-full border border-white/40 flex items-center gap-1 font-bold text-xs">
-              <Clock size={14} /> 已省回 {timeSaved} 分钟
-            </div>
-            <button
-              onClick={() => { void toggleTheaterCueEnabled(); }}
-              className="bg-white/20 px-3 py-1 rounded-full border border-white/40 text-xs font-bold flex items-center gap-1"
-            >
-              {theaterCueEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
-              {theaterCueEnabled ? 'Cue 开' : 'Cue 关'}
-            </button>
-            {user && (
-              <button 
-                onClick={() => { logoutUser(); setDemoMode(false); setCurrentScreen('welcome'); }}
-                className="bg-white/20 px-3 py-1 rounded-full border border-white/40 text-xs font-bold"
-              >
-                登出
-              </button>
-            )}
-            {!user && demoMode && (
-              <button
-                onClick={() => { setDemoMode(false); setCurrentScreen('welcome'); }}
-                className="bg-white/20 px-3 py-1 rounded-full border border-white/40 text-xs font-bold"
-              >
-                退出 Demo
-              </button>
-            )}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-3 gap-3">
-          <div className="bg-white text-[#1a1a2e] p-3 rounded-2xl border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e] text-center">
-            <div className="text-xs font-bold text-gray-500 mb-1">目标分</div>
-            <div className="text-2xl font-display font-bold text-[var(--color-primary)]">{targetScore}</div>
-          </div>
-          <div className="bg-white text-[#1a1a2e] p-3 rounded-2xl border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e] text-center">
-            <div className="text-xs font-bold text-gray-500 mb-1">今日任务</div>
-            <div className="text-2xl font-display font-bold text-[var(--color-secondary)]">{todayPlan.length}</div>
-          </div>
-          <div className="bg-white text-[#1a1a2e] p-3 rounded-2xl border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e] text-center">
-            <div className="text-xs font-bold text-gray-500 mb-1">待修错题</div>
-            <div className="text-2xl font-display font-bold text-[var(--color-accent-pink)]">{errorStats.total}</div>
-          </div>
-        </div>
-      </div>
-
-      <div className="flex-1 p-6 overflow-y-auto w-full max-w-lg mx-auto">
-        <div className="game-card p-5 mb-6 bg-[#1a1a2e] text-white border-0 relative overflow-hidden">
-          <div className="absolute top-0 right-0 p-4 opacity-10"><Target size={96} /></div>
-          <div className="flex items-center justify-between mb-3 relative z-10">
-            <h3 className="font-display text-2xl font-bold">今日任务</h3>
-            <span className="text-xs font-bold bg-white/10 px-3 py-1 rounded-full border border-white/15">
-              {planTotals.minutes} 分钟 · {planTotals.xp} XP
-            </span>
-          </div>
-          <p className="text-sm text-gray-300 font-medium relative z-10">
-            系统已按 {targetScore} 分目标重排路线。先修最值钱的失分点，再决定要不要继续扩张。
-          </p>
-        </div>
-
-        <div className="game-card p-4 mb-6 bg-white border-2 border-[#1a1a2e]">
-          <div className="flex items-center justify-between mb-3">
-            <div>
-              <h3 className="font-bold text-lg text-[#1a1a2e] flex items-center gap-2">
-                <BrainCircuit size={18} className="text-[var(--color-primary)]" /> 长期学生状态
-              </h3>
-              <p className="text-xs text-gray-500 font-medium mt-1">现在的默认节奏，已经开始从历史 session 自动长出来。</p>
-            </div>
-            <button
-              onClick={() => { void refreshStudentStateSummary(user?.uid || 'demo-student'); }}
-              className="text-[11px] font-bold text-[var(--color-primary)]"
-            >
-              刷新
-            </button>
-          </div>
-
-          <div className="grid grid-cols-3 gap-2 mb-3">
-            {studentModelCards.map((item) => (
-              <div key={item.label} className="rounded-xl border border-gray-100 bg-gray-50 p-3 text-center">
-                <div className={`text-base font-display font-bold ${item.tone}`}>{item.value}</div>
-                <div className="mt-1 text-[10px] font-bold text-gray-500">{item.label}</div>
-              </div>
-            ))}
-          </div>
-
-          <div className="space-y-2 text-sm">
-            <div className="rounded-xl border border-gray-100 bg-white p-3">
-              <p className="text-[11px] font-bold text-gray-500 mb-1">近期高频痛点</p>
-              <p className="font-bold text-[#1a1a2e]">
-                {studentStateSummary?.recentPainPoints?.slice(0, 2).join(' · ') || '还在等待第一批可积累状态'}
-              </p>
-            </div>
-            <div className="rounded-xl border border-gray-100 bg-white p-3">
-              <p className="text-[11px] font-bold text-gray-500 mb-1">当前活跃规则</p>
-              <p className="font-bold text-[#1a1a2e]">
-                {studentStateSummary?.activeRules?.[0] || '完成 1 次剧场交互后，这里会出现长期默认规则。'}
-              </p>
-            </div>
-            <div className="rounded-xl border border-gray-100 bg-white p-3">
-              <p className="text-[11px] font-bold text-gray-500 mb-1">认知状态快照</p>
-              <p className="font-medium text-gray-700">
-                Focus {studentStateSummary?.currentCognitiveState?.focus ?? '--'} / Frustration {studentStateSummary?.currentCognitiveState?.frustration ?? '--'} / Joy {studentStateSummary?.currentCognitiveState?.joy ?? '--'}
-              </p>
-            </div>
-          </div>
-        </div>
-
-        <div className="space-y-3 mb-6">
-          {todayPlan.map((task) => {
-            const meta = SUBJECT_META[task.subject];
-            const statusLabel = task.status === 'urgent' ? '优先' : task.status === 'done' ? '已完成' : '待执行';
-            const statusClass = task.status === 'urgent'
-              ? 'bg-[#1a1a2e] text-white'
-              : task.status === 'done'
-                ? 'bg-[var(--color-accent-green)] text-[#1a1a2e]'
-                : 'bg-white text-gray-500';
-
-            return (
-              <div key={task.id} className="game-card p-4 relative overflow-hidden">
-                <div className="absolute -right-5 -top-5 w-20 h-20 rounded-full opacity-20" style={{ backgroundColor: meta.color }}></div>
-                <div className="flex justify-between items-start gap-3 mb-3">
-                  <div>
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-bold px-2 py-1 rounded border-2 border-[#1a1a2e]" style={{ backgroundColor: meta.color, color: task.subject === 'en' ? '#1a1a2e' : '#fff' }}>
-                        {meta.name}
-                      </span>
-                      <span className={`text-[11px] font-bold px-2 py-1 rounded-full border ${statusClass}`}>{statusLabel}</span>
-                    </div>
-                    <h4 className="font-bold text-lg text-[#1a1a2e]">{task.title}</h4>
-                    <p className="text-sm text-gray-600 font-medium mt-1 leading-relaxed">{task.detail}</p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <div className="text-xs font-bold text-gray-500 flex items-center gap-1 justify-end"><Clock size={12} /> {task.mins}min</div>
-                    <div className="text-sm font-bold mt-2" style={{ color: meta.color }}>+{task.xp} XP</div>
-                  </div>
-                </div>
-
-                <button
-                  onClick={() => handleTaskAction(task)}
-                  className="game-btn bg-[var(--color-primary)] text-white w-full py-3 text-sm flex justify-center items-center gap-2"
-                >
-                  {task.status === 'done' ? '再执行一次' : '开始这一步'} <ChevronRight size={16} />
-                </button>
-              </div>
-            );
-          })}
-        </div>
-
-        <div className="grid grid-cols-2 gap-3 mb-6">
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="game-card p-4 text-left bg-[var(--color-secondary)] border-4 border-[#1a1a2e] shadow-[4px_4px_0_#1a1a2e]"
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <div className="bg-white p-2 rounded-full border-2 border-[#1a1a2e]"><Camera size={18} className="text-[#1a1a2e]" /></div>
-              <span className="font-display font-bold text-[#1a1a2e]">拍题破局</span>
-            </div>
-            <p className="text-sm font-bold text-[#1a1a2e]/80">上传真实难题，直接拆出法则与检测题。</p>
-          </button>
-
-          <button
-            onClick={() => dehydrateInputRef.current?.click()}
-            className="game-card p-4 text-left bg-[#1a1a2e] text-white border-4 border-[var(--color-secondary)] shadow-[0_0_15px_var(--color-secondary)]"
-          >
-            <div className="flex items-center gap-2 mb-3">
-              <div className="bg-white/10 p-2 rounded-full border border-white/15"><Zap size={18} className="text-[var(--color-secondary)]" /></div>
-              <span className="font-display font-bold text-[var(--color-secondary)]">作业脱水</span>
-            </div>
-            <p className="text-sm font-bold text-gray-300">整页作业拍进来，系统只留下必须做的题。</p>
-          </button>
-        </div>
-
-        <div className="game-card p-4">
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-bold text-lg text-[#1a1a2e] flex items-center gap-2">
-              <RefreshCw size={18} className="text-[var(--color-secondary)]" /> 错题雷达
-            </h3>
-            <button
-              onClick={() => setCurrentScreen('error-book')}
-              className="text-sm font-bold text-[var(--color-primary)]"
-            >
-              查看全部
-            </button>
-          </div>
-          <div className="grid grid-cols-4 gap-2">
-            <div className="bg-gray-50 rounded-xl p-3 text-center border border-gray-100">
-              <div className="text-xl font-display font-bold text-[#1a1a2e]">{errorStats.total}</div>
-              <div className="text-[10px] font-bold text-gray-500 mt-1">总错题</div>
-            </div>
-            <div className="rounded-xl p-3 text-center border" style={{ backgroundColor: SUBJECT_META.zh.light, borderColor: 'rgba(255,93,115,0.15)' }}>
-              <div className="text-xl font-display font-bold" style={{ color: SUBJECT_META.zh.color }}>{errorStats.zh}</div>
-              <div className="text-[10px] font-bold text-gray-500 mt-1">语文</div>
-            </div>
-            <div className="rounded-xl p-3 text-center border" style={{ backgroundColor: SUBJECT_META.ma.light, borderColor: 'rgba(0,180,216,0.15)' }}>
-              <div className="text-xl font-display font-bold" style={{ color: SUBJECT_META.ma.color }}>{errorStats.ma}</div>
-              <div className="text-[10px] font-bold text-gray-500 mt-1">数学</div>
-            </div>
-            <div className="rounded-xl p-3 text-center border" style={{ backgroundColor: SUBJECT_META.en.light, borderColor: 'rgba(255,190,11,0.15)' }}>
-              <div className="text-xl font-display font-bold" style={{ color: SUBJECT_META.en.color }}>{errorStats.en}</div>
-              <div className="text-[10px] font-bold text-gray-500 mt-1">英语</div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </motion.div>
-  );
 
   const renderSubjectMap = () => {
     const activeMeta = SUBJECT_META[mapSubject];
@@ -1791,1239 +2270,422 @@ export default function App() {
     const recommendedNodeActive = mapSubject === preferredFocus.subject ? preferredFocus.node : '';
 
     return (
-      <motion.div 
-        key="subject-map"
-        initial={{ opacity: 0, x: 20 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: -20 }}
-        className="absolute inset-0 w-full h-full flex flex-col bg-[#F4F6FB] pb-24"
+      <Suspense
+        fallback={renderFeatureLoading('知识地图装配中', '正在挂载学科节点、推荐主线和地图交互...')}
       >
-        <div className="text-white p-6 pt-10 rounded-b-[40px] shadow-lg border-b-4 border-[#1a1a2e] relative z-10" style={{ backgroundColor: activeMeta.color }}>
-          <h2 className="text-2xl font-display font-bold flex items-center gap-2"><MapIcon /> {activeMeta.name} · 知识地图</h2>
-          <p className="text-sm font-bold text-white/80 mt-2">当前教材：{activeTextbook}。点亮已掌握节点，盯住正在失血的区域，锁住暂时不该花时间的深水区。</p>
-          <div className="mt-4 bg-white/15 rounded-2xl p-3 border border-white/20">
-            <div className="flex justify-between text-xs font-bold mb-2">
-              <span>{activeMeta.textbookLabel}</span>
-              <span>{overallProgress}%</span>
-            </div>
-            <div className="h-3 bg-black/20 rounded-full overflow-hidden">
-              <div className="h-full bg-white rounded-full transition-all" style={{ width: `${overallProgress}%` }}></div>
-            </div>
-          </div>
-          <div className="flex gap-2 mt-4 overflow-x-auto pb-2 [&::-webkit-scrollbar]:hidden">
-            {(['zh', 'ma', 'en'] as SubjectKey[]).map((subject) => (
-              <button
-                key={subject}
-                onClick={() => setMapSubject(subject)}
-                className={`px-4 py-1 font-bold rounded-full border-2 text-sm whitespace-nowrap ${mapSubject === subject ? 'bg-white text-[#1a1a2e] border-[#1a1a2e]' : 'bg-black/20 text-white border-transparent'}`}
-              >
-                {SUBJECT_META[subject].name}
-              </button>
-            ))}
-          </div>
-        </div>
-
-        <div className="flex-1 p-6 overflow-y-auto w-full max-w-lg mx-auto">
-          {recommendedNodeActive ? (
-            <div className="mb-4 rounded-2xl border-2 border-[#1a1a2e] bg-white px-4 py-3 shadow-[3px_3px_0_#1a1a2e]">
-              <p className="text-[11px] font-bold text-gray-500 mb-1">AI 推荐修复节点</p>
-              <p className="font-bold text-[#1a1a2e]">
-                先处理“{recommendedNodeActive}”
-                {studentStateSummary?.interactionStats.lastOutcome === 'failure' ? '，因为最近一次裁决还没命中规则。' : '，这是最近长期状态里最该优先收口的一块。'}
-              </p>
-            </div>
-          ) : null}
-
-          <div className="grid grid-cols-3 gap-3 mb-6">
-            <div className="game-card p-4 text-center">
-              <div className="text-2xl font-display font-bold text-[var(--color-accent-green)]">{masteredCount}</div>
-              <div className="text-xs font-bold text-gray-500 mt-1">已掌握</div>
-            </div>
-            <div className="game-card p-4 text-center">
-              <div className="text-2xl font-display font-bold text-[var(--color-secondary)]">{learningCount}</div>
-              <div className="text-xs font-bold text-gray-500 mt-1">修复中</div>
-            </div>
-            <div className="game-card p-4 text-center">
-              <div className="text-2xl font-display font-bold text-gray-400">{activeNodes.length - learningCount - masteredCount}</div>
-              <div className="text-xs font-bold text-gray-500 mt-1">未启动</div>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            {activeNodes.map((node, index) => {
-              const isLearning = node.state === 'learning';
-              const isMastered = node.state === 'mastered';
-              const offset = index % 2 === 0 ? 'translate-x-8' : '-translate-x-8';
-              const isRecommended = Boolean(recommendedNodeActive && node.name === recommendedNodeActive);
-
-              return (
-                <div key={node.name} className={`relative flex flex-col items-center ${offset}`}>
-                  {index !== activeNodes.length - 1 && (
-                    <div className="absolute top-16 h-12 border-l-4 border-dashed border-gray-300"></div>
-                  )}
-                  {isRecommended && (
-                    <div className="absolute -top-2 z-20 rounded-full bg-[var(--color-secondary)] px-3 py-1 text-[10px] font-black text-[#1a1a2e] border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e]">
-                      AI 推荐修复
-                    </div>
-                  )}
-                  <button
-                    onClick={() => handleMapNodePress(mapSubject, node.name)}
-                    className={`relative z-10 w-18 h-18 rounded-full border-4 mb-3 flex items-center justify-center transition-transform ${node.state === 'locked' ? 'cursor-pointer bg-gray-200 text-gray-400 border-[#1a1a2e]' : 'cursor-pointer hover:scale-105 border-[#1a1a2e]'}`}
-                    style={{
-                      width: isRecommended ? 92 : isLearning ? 84 : 72,
-                      height: isRecommended ? 92 : isLearning ? 84 : 72,
-                      backgroundColor: isMastered ? 'var(--color-accent-green)' : isLearning ? activeMeta.color : '#d1d5db',
-                      color: isLearning ? '#fff' : isMastered ? '#1a1a2e' : '#6b7280',
-                      boxShadow: isRecommended
-                        ? `0 0 0 4px rgba(255,190,11,0.35), 4px 4px 0 #1a1a2e`
-                        : isLearning
-                          ? '4px 4px 0 #1a1a2e'
-                          : '2px 2px 0 rgba(26,26,46,0.25)',
-                    }}
-                  >
-                    {isMastered ? <Check size={26} strokeWidth={3.5} /> : isLearning ? <Flame size={28} /> : <Lock size={22} />}
-                  </button>
-                  <div className="text-center max-w-[180px]">
-                    <div className={`inline-flex px-3 py-1 rounded-full border-2 border-[#1a1a2e] font-bold text-sm ${isLearning ? 'bg-white shadow-[2px_2px_0_#1a1a2e]' : isMastered ? 'bg-[var(--color-accent-green)] text-[#1a1a2e]' : 'bg-white text-gray-400'} ${isRecommended ? 'ring-2 ring-[var(--color-secondary)]' : ''}`}>
-                      {node.name}
-                    </div>
-                    <div className="text-sm font-display font-bold mt-2" style={{ color: isLearning ? activeMeta.color : isMastered ? 'var(--color-accent-green)' : '#9ca3af' }}>
-                      {node.progress}%
-                    </div>
-                    <div className="text-xs font-bold text-gray-500 mt-2">
-                      {isRecommended ? '系统建议先修这一个' : isLearning ? '点击直接去修复' : isMastered ? '已稳定拿分' : '暂未进入今日主线'}
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </motion.div>
+        <SubjectMapView
+          mapSubject={mapSubject}
+          activeMeta={activeMeta}
+          activeTextbook={activeTextbook}
+          overallProgress={overallProgress}
+          subjectTabs={(['zh', 'ma', 'en'] as SubjectKey[]).map((subject) => ({
+            key: subject,
+            label: SUBJECT_META[subject].name,
+          }))}
+          recommendedNodeActive={recommendedNodeActive}
+          lastOutcome={studentStateSummary?.interactionStats?.lastOutcome}
+          masteredCount={masteredCount}
+          learningCount={learningCount}
+          inactiveCount={activeNodes.length - learningCount - masteredCount}
+          nodes={activeNodes.map((node) => ({
+            ...node,
+            isRecommended: Boolean(recommendedNodeActive && node.name === recommendedNodeActive),
+          }))}
+          onSubjectChange={(subject) => setMapSubject(subject)}
+          onNodePress={(nodeName, targetErrorId) => handleMapNodePress(mapSubject, nodeName, targetErrorId)}
+        />
+      </Suspense>
     );
   };
 
   const renderErrorBook = () => (
-    <motion.div 
-      key="error-book"
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      className="absolute inset-0 w-full h-full flex flex-col bg-gray-50 pb-24"
+    <Suspense
+      fallback={renderFeatureLoading('错题本装配中', '正在挂载知识图谱摘要、筛选器和错题卡片...')}
     >
-      <div className="p-6 pt-10 flex-1 overflow-y-auto">
-        <h2 className="text-3xl font-display font-bold text-[#1a1a2e] flex items-center gap-2 mb-2">
-          <RefreshCw className="text-[var(--color-secondary)]" /> 错题本增强
-        </h2>
-        <p className="text-gray-500 font-bold mb-6 text-sm">不再只是收藏夹。这里负责筛选、重做、消灭和退出重复失分。</p>
+      <ErrorBookView
+        studentStateSummary={studentStateSummary}
+        knowledgeGraph={knowledgeGraph}
+        knowledgeGraphStatus={knowledgeGraphStatus}
+        knowledgeGraphError={knowledgeGraphError}
+        knowledgeGraphNotice={knowledgeGraphNotice}
+        focusContext={errorBookFocus}
+        graphLinkedErrors={graphLinkedErrors}
+        recommendedErrorId={recommendedErrorId}
+        onRefreshKnowledgeGraph={() => { void refreshKnowledgeGraph(user?.uid || 'demo-student', { manual: true }); }}
+        onFocusGraphError={handleGraphErrorFocus}
+        errorStats={errorStats}
+        errorFilter={errorFilter}
+        onFilterChange={(value) => {
+          setErrorFilter(value);
+          if (errorBookFocus && value !== 'all' && value !== errorBookFocus.subject) {
+            setErrorBookFocus(null);
+            setGraphFocusedErrorId(null);
+          }
+        }}
+        errorCards={filteredErrors.map((err, idx) => {
+          const cardId = err.id || `error-${idx}`;
+          const { subject, node } = getErrorMeta(err);
+          const meta = SUBJECT_META[subject];
 
-        <div className="game-card p-4 mb-5 border-2 border-[#1a1a2e] bg-[#1a1a2e] text-white">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <p className="text-xs font-bold text-white/60 mb-1">长期状态摘要</p>
-              <p className="font-bold text-sm leading-relaxed">
-                {studentStateSummary?.interactionStats.lastOutcome === 'success'
-                  ? '最近一次剧场裁决命中了规则，可以继续做窄提示强化。'
-                  : studentStateSummary?.interactionStats.lastOutcome === 'failure'
-                    ? '最近一次剧场裁决未命中规则，当前更适合保护性引导。'
-                    : '还没有足够的长期裁决数据，先从首轮剧场重构开始。'}
-              </p>
-            </div>
-            <div className="text-right shrink-0">
-              <div className="text-xl font-display font-bold text-[var(--color-secondary)]">
-                {studentStateSummary?.interactionStats.successCount ?? 0}/{(studentStateSummary?.interactionStats.successCount ?? 0) + (studentStateSummary?.interactionStats.failureCount ?? 0)}
-              </div>
-              <div className="text-[10px] font-bold text-white/60">成功裁决</div>
-            </div>
-          </div>
-          <div className="mt-3 flex gap-2 overflow-x-auto [&::-webkit-scrollbar]:hidden">
-            {(studentStateSummary?.recentPainPoints?.length
-              ? studentStateSummary.recentPainPoints.slice(0, 3)
-              : ['等待状态积累']).map((item) => (
-              <span
-                key={item}
-                className="whitespace-nowrap rounded-full border border-white/15 bg-white/10 px-3 py-1 text-[11px] font-bold text-white/85"
-              >
-                {item}
-              </span>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-4 gap-2 mb-5">
-          <div className="game-card p-3 text-center">
-            <div className="text-2xl font-display font-bold text-[#1a1a2e]">{errorStats.total}</div>
-            <div className="text-[10px] font-bold text-gray-500 mt-1">总错题</div>
-          </div>
-          <div className="game-card p-3 text-center" style={{ backgroundColor: SUBJECT_META.zh.light }}>
-            <div className="text-2xl font-display font-bold" style={{ color: SUBJECT_META.zh.color }}>{errorStats.zh}</div>
-            <div className="text-[10px] font-bold text-gray-500 mt-1">语文</div>
-          </div>
-          <div className="game-card p-3 text-center" style={{ backgroundColor: SUBJECT_META.ma.light }}>
-            <div className="text-2xl font-display font-bold" style={{ color: SUBJECT_META.ma.color }}>{errorStats.ma}</div>
-            <div className="text-[10px] font-bold text-gray-500 mt-1">数学</div>
-          </div>
-          <div className="game-card p-3 text-center" style={{ backgroundColor: SUBJECT_META.en.light }}>
-            <div className="text-2xl font-display font-bold" style={{ color: SUBJECT_META.en.color }}>{errorStats.en}</div>
-            <div className="text-[10px] font-bold text-gray-500 mt-1">英语</div>
-          </div>
-        </div>
-
-        <div className="flex gap-2 mb-6 overflow-x-auto [&::-webkit-scrollbar]:hidden">
-          {([
-            ['all', '全部'],
-            ['zh', '语文'],
-            ['ma', '数学'],
-            ['en', '英语'],
-          ] as [ErrorFilter, string][]).map(([value, label]) => (
-            <button
-              key={value}
-              onClick={() => setErrorFilter(value)}
-              className={`px-4 py-2 rounded-xl border-2 font-bold text-sm whitespace-nowrap ${errorFilter === value ? 'bg-[#1a1a2e] text-white border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e]' : 'bg-white text-gray-500 border-gray-200'}`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div className="space-y-4">
-          {filteredErrors.length === 0 ? (
-            <div className="text-center text-gray-400 mt-10 font-bold border-2 border-gray-200 border-dashed rounded-xl p-8">
-              当前筛选下没有待修复错题，继续保持这条线的稳定输出。
-            </div>
-          ) : (
-            filteredErrors.map((err, idx) => {
-              const { subject, node } = getErrorMeta(err);
-              const meta = SUBJECT_META[subject];
-              const isRecommended = Boolean(recommendedErrorId && err.id === recommendedErrorId);
-
-              return (
-                <div
-                  key={err.id || idx}
-                  className="game-card p-4 relative flex flex-col"
-                  style={{
-                    borderLeftWidth: 8,
-                    borderLeftColor: meta.color,
-                    boxShadow: isRecommended ? '0 0 0 3px rgba(255,190,11,0.25), 4px 4px 0 rgba(26,26,46,0.18)' : undefined,
-                  }}
-                >
-                  {isRecommended && (
-                    <div className="absolute right-3 top-3 rounded-full bg-[var(--color-secondary)] px-3 py-1 text-[10px] font-black text-[#1a1a2e] border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e]">
-                      AI 当前主线
-                    </div>
-                  )}
-                  <div className="flex justify-between items-start gap-3 mb-2">
-                    <div>
-                      <div className="flex items-center gap-2 mb-2">
-                        <span className="text-xs font-bold px-2 py-1 rounded border-2 border-[#1a1a2e]" style={{ backgroundColor: meta.color, color: subject === 'en' ? '#1a1a2e' : '#fff' }}>
-                          {meta.name}
-                        </span>
-                        <span className="text-[11px] font-bold bg-gray-100 text-gray-500 px-2 py-1 rounded border border-gray-200">
-                          {getErrorRecencyLabel(idx)}
-                        </span>
-                      </div>
-                      <h4 className="font-bold text-lg text-[#1a1a2e] line-clamp-2">{node}</h4>
-                    </div>
-                    <span className="text-xs font-bold bg-[#1a1a2e] text-white px-2 py-1 rounded whitespace-nowrap">待复活</span>
-                  </div>
-
-                  <p className="text-sm text-gray-600 font-medium leading-relaxed mb-3">
-                    {err.rule || err.painPoint || err.questionText?.substring(0, 60)}
-                  </p>
-
-                  <div className="flex gap-2 mb-4 overflow-x-auto [&::-webkit-scrollbar]:hidden">
-                    <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded border border-gray-200 whitespace-nowrap">{meta.short}薄弱点</span>
-                    <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded border border-gray-200 whitespace-nowrap">点击可重做</span>
-                    <span className="bg-gray-100 text-gray-600 text-xs font-bold px-2 py-1 rounded border border-gray-200 whitespace-nowrap">{node}</span>
-                    {isRecommended && (
-                      <span className="bg-[var(--color-secondary)]/20 text-[#1a1a2e] text-xs font-bold px-2 py-1 rounded border-2 border-[#1a1a2e] whitespace-nowrap">长期状态推荐</span>
-                    )}
-                  </div>
-                 
-                  <div className="grid grid-cols-3 gap-2 mt-auto">
-                    <button 
-                      onClick={() => startContinuousPractice(filteredErrors, idx)}
-                      className="game-btn bg-gray-200 text-gray-700 py-3 text-sm flex justify-center items-center gap-1 border-0"
-                    >
-                      连续练习
-                    </button>
-                    <button 
-                      onClick={() => {
-                        setPracticeQueue([]);
-                        setPracticeIndex(0);
-                        generateTheaterScript(err);
-                      }}
-                      className="game-btn bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500 text-white py-3 text-sm flex justify-center items-center gap-2 border-2 border-[#1a1a2e] shadow-[2px_2px_0_#1a1a2e]"
-                    >
-                      剧场重构
-                    </button>
-                    <button
-                      onClick={async () => {
-                        if (demoMode) {
-                          setErrorList((current) => current.filter((item) => item.id !== err.id));
-                        } else {
-                          if (!user || !err.id) return;
-                          await resolveError(user.uid, err.id);
-                        }
-                        await markTaskComplete('error-revive');
-                        await markTaskComplete('stability-round');
-                        if (!demoMode) {
-                          await loadErrors();
-                        }
-                      }}
-                      className="game-btn bg-[var(--color-accent-green)] text-[#1a1a2e] py-3 text-sm flex justify-center items-center gap-1 border-0"
-                    >
-                      已掌握
-                    </button>
-                  </div>
-                </div>
-              );
-            })
-          )}
-        </div>
-      </div>
-    </motion.div>
+          return {
+            id: cardId,
+            subject,
+            subjectName: meta.name,
+            subjectShort: meta.short,
+            subjectColor: meta.color,
+            subjectBadgeTextColor: subject === 'en' ? '#1a1a2e' : '#fff',
+            node,
+            summary: err.rule || err.painPoint || err.questionText?.substring(0, 60) || '',
+            recencyLabel: getErrorRecencyLabel(idx),
+            isRecommended: Boolean(recommendedErrorId && err.id === recommendedErrorId),
+            isGraphFocused: Boolean(graphFocusedErrorId && err.id === graphFocusedErrorId),
+            exploreRecommendation: errorExploreRecommendations[cardId] ?? null,
+          };
+        })}
+        registerCardRef={(id, node) => {
+          errorCardRefs.current[id] = node;
+        }}
+        onStartContinuousPractice={(index) => {
+          void startContinuousPractice(filteredErrors, index);
+        }}
+        onGenerateTheater={(errorId) => {
+          const targetError = filteredErrors.find((item) => item.id === errorId);
+          if (!targetError) return;
+          setPracticeQueue([]);
+          setPracticeIndex(0);
+          void generateTheaterScript(targetError);
+        }}
+        onMarkMastered={(errorId) => {
+          void (async () => {
+            if (demoMode) {
+              setErrorList((current) => current.filter((item) => item.id !== errorId));
+            } else {
+              if (!user) return;
+              await resolveError(user.uid, errorId);
+              await refreshKnowledgeGraph(user.uid);
+            }
+            await markTaskComplete('error-revive');
+            await markTaskComplete('stability-round');
+            if (!demoMode) {
+              await loadErrors();
+            }
+          })();
+        }}
+        onOpenExploreNode={(engineKey: ExploreEngineKey, nodeKey: string) => {
+          navigateExplore({ engineKey, nodeKey });
+        }}
+      />
+    </Suspense>
   );
 
   const renderOverview = () => (
-    <motion.div 
-      key="overview"
-      initial={{ opacity: 0, x: 20 }}
-      animate={{ opacity: 1, x: 0 }}
-      exit={{ opacity: 0, x: -20 }}
-      className="absolute inset-0 w-full h-full flex flex-col bg-gray-50 pb-24 p-6 pt-10"
+    <Suspense
+      fallback={renderFeatureLoading('总览装配中', '正在挂载周效率、近期进展和体验偏好面板...')}
     >
-      <h2 className="text-3xl font-display font-bold text-[#1a1a2e] flex items-center gap-2 mb-6">
-        <Trophy className="text-[var(--color-primary)]" /> 驾驶舱
-      </h2>
-      <div className="bg-[#1a1a2e] text-white p-6 rounded-[32px] border-4 border-[#1a1a2e] shadow-[4px_4px_0_#1a1a2e] mb-6 relative overflow-hidden">
-        <div className="absolute top-4 right-4 opacity-10"><Trophy size={100} /></div>
-        <p className="text-gray-400 font-bold mb-2 text-sm relative z-10">本周效率评估</p>
-        <div className="flex items-end gap-2 mb-4 relative z-10">
-          <span className="text-5xl font-display font-bold text-[var(--color-primary)]">S</span>
-          <span className="text-lg font-bold">极佳</span>
-        </div>
-        <p className="font-medium text-sm relative z-10 leading-relaxed text-gray-300">
-          累计省下低效练习时间 <span className="text-[var(--color-secondary)] font-bold text-lg">{timeSaved} 分钟</span>，
-          预测周末 Boss 战将额外提分 <span className="text-[var(--color-accent-green)] font-bold text-lg">+18 分</span>。
-        </p>
-      </div>
-
-      <h3 className="font-bold text-lg mb-3">近期核心进展</h3>
-      <div className="game-card p-4 space-y-3">
-        <div className="flex items-center justify-between border-b border-gray-100 pb-2">
-          <span className="font-bold text-[#1a1a2e] text-sm">攻克高危知识点</span>
-          <span className="text-[var(--color-primary)] font-bold">4 个</span>
-        </div>
-        <div className="flex items-center justify-between border-b border-gray-100 pb-2">
-          <span className="font-bold text-[#1a1a2e] text-sm">错题重复失效率</span>
-          <span className="text-[var(--color-accent-green)] font-bold text-sm">↓ 12% (稳步下降)</span>
-        </div>
-      </div>
-
-      <h3 className="font-bold text-lg mb-3 mt-6">体验偏好</h3>
-      <div className="game-card p-4 space-y-3">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="font-bold text-[#1a1a2e] text-sm">剧场分支 Cue 音效</p>
-            <p className="text-xs text-gray-500 leading-relaxed mt-1">
-              控制分支视频 ready 时的短音效提示。视觉切换会始终保留。
-            </p>
-          </div>
-          <button
-            type="button"
-            onClick={() => { void toggleTheaterCueEnabled(); }}
-            className={`inline-flex items-center gap-2 rounded-full px-3 py-2 text-[11px] font-mono border transition ${
-              theaterCueEnabled
-                ? 'bg-[#1a1a2e] text-white border-[#1a1a2e]'
-                : 'bg-gray-100 text-gray-500 border-gray-200'
-            }`}
-          >
-            {theaterCueEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
-            {theaterCueEnabled ? '已开启' : '已静音'}
-          </button>
-        </div>
-      </div>
-    </motion.div>
+      <OverviewView
+        timeSaved={timeSaved}
+        theaterCueEnabled={theaterCueEnabled}
+        onToggleCue={() => { void toggleTheaterCueEnabled(); }}
+        overview={overviewState}
+      />
+    </Suspense>
   );
 
   const [combatAnswer, setCombatAnswer] = useState('');
 
-  const renderCombat = () => {
-    if (aiMode === 'analyzing') {
-      return (
-        <motion.div 
-          key="analyze"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-[var(--color-secondary)] text-[#1a1a2e]"
-        >
-          <motion.div
-            animate={{ rotate: 360, scale: [1, 1.1, 1] }}
-            transition={{ duration: 1.5, repeat: Infinity }}
-            className="mb-8"
-          >
-            <Camera size={80} />
-          </motion.div>
-          <h2 className="text-3xl font-display font-bold mb-4">多模态剥离中...</h2>
-          <div className="w-64 space-y-3">
-             <div className="flex items-center gap-2 font-bold"><Check size={18}/> 提取题干与迷惑图层</div>
-             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1 }} className="flex items-center gap-2 font-bold"><Check size={18}/> 检索全网真题同源模型</motion.div>
-             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 2 }} className="flex items-center gap-2 font-bold"><Check size={18}/> 生成定制化“一句话法则”</motion.div>
-          </div>
-        </motion.div>
-      );
-    }
+  const renderFeatureLoading = (title: string, detail: string) => (
+    <div className="wind-page absolute inset-0 flex items-center justify-center px-6">
+      <div className="wind-panel px-8 py-7 text-center">
+        <div className="mx-auto mb-4 flex h-14 w-14 items-center justify-center rounded-2xl bg-[linear-gradient(180deg,rgba(61,123,255,0.18),rgba(61,123,255,0.08))] text-[var(--color-primary)]">
+          <SparkleIcon className="h-7 w-7" />
+        </div>
+        <p className="text-lg font-black text-[#1a1a2e]">{title}</p>
+        <p className="mt-2 text-sm font-medium text-gray-500">{detail}</p>
+      </div>
+    </div>
+  );
 
+  const renderCombat = (phase: 'question' | 'feedback') => {
     const isAiContent = aiMode === 'ready' && aiData;
+    const isCorrect = isAiContent ? combatAnswer === aiData.correctAnswer : combatAnswer === '延长 CD 至 E，使 DE = CD，连接 AE, BE';
+    const continueLabel =
+      practiceQueue.length > 1 && practiceIndex < practiceQueue.length - 1
+        ? '进入下一题'
+        : '收下战利品';
 
     return (
-      <motion.div 
-        key="combat"
-        initial={{ opacity: 0, scale: 0.95 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0, scale: 0.95 }}
-        className="absolute inset-0 w-full h-full flex flex-col bg-white"
+      <Suspense
+        fallback={renderFeatureLoading(
+          phase === 'question' ? '作战模块装配中' : '结算面板装配中',
+          phase === 'question' ? '正在挂载新的战斗流界面...' : '正在同步本次战斗结果...',
+        )}
       >
-        <div className="p-4 border-b-2 border-gray-200 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <button onClick={() => setCurrentScreen('dashboard')} className="mr-2 text-gray-500 hover:text-gray-700 bg-gray-100 p-1.5 rounded-full">
-              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-            <div className={`w-3 h-3 rounded-full ${isAiContent ? 'bg-[var(--color-secondary)]' : 'bg-[var(--color-subj-ma)]'}`}></div>
-            <span className="font-bold text-sm">
-              {practiceQueue.length > 1
-                ? `连续练习 ${practiceIndex + 1}/${practiceQueue.length}`
-                : isAiContent
-                  ? 'AI 多模态动态推演'
-                  : '极光数学 · 几何辅助线'}
-            </span>
-          </div>
-          <div className="bg-gray-100 rounded-full h-2 w-24 overflow-hidden border border-gray-300">
-            <div
-              className="bg-[var(--color-primary)] h-full transition-all"
-              style={{ width: `${practiceQueue.length > 1 ? ((practiceIndex + 1) / practiceQueue.length) * 100 : 50}%` }}
-            ></div>
-          </div>
-        </div>
-
-        <div className="flex-1 p-6 flex flex-col max-w-lg mx-auto w-full overflow-y-auto">
-          {/* AI Prediction Header */}
-          <div className="bg-[var(--color-secondary)]/10 border-2 border-[var(--color-secondary)] rounded-xl p-4 mb-4 flex gap-3 relative overflow-hidden">
-             <div className="absolute -right-4 -bottom-4 opacity-10"><Target size={80} /></div>
-             <div className="text-[var(--color-secondary)] z-10"><BrainCircuit size={24} /></div>
-             <div className="z-10">
-               <h5 className="font-bold text-sm text-[var(--color-secondary)] mb-1">AI 考向超前预判</h5>
-               <p className="text-xs font-bold text-[#1a1a2e] opacity-80 leading-relaxed">
-                 {isAiContent ? `【痛点锁定】：${aiData.painPoint}。掌握规则可直接避开陷阱。` : '分析全国近 3 年期末真题库证实，此模型【必考频率 96%】。拿下它可直接锁定 +4 分。'}
-               </p>
-             </div>
-          </div>
-
-          {/* Core Rule */}
-          <div className="bg-[var(--color-primary)]/10 border-2 border-[var(--color-primary)] rounded-xl p-4 mb-6 flex gap-3">
-            <div className="bg-[var(--color-primary)] text-white rounded-full p-2 h-fit border-2 border-[#1a1a2e] min-w-fit"><Beaker size={20} /></div>
-            <div>
-              <h5 className="font-bold text-[var(--color-primary)] text-sm mb-1 uppercase tracking-wider">一句话法则</h5>
-              <p className="font-bold text-[#1a1a2e]">{isAiContent ? aiData.rule : '遇中点，连中线。构造平行四边形或中位线定理。'}</p>
-            </div>
-          </div>
-
-          {/* Question */}
-          <div className="flex-1 mb-6">
-            <h3 className="font-bold text-lg mb-4">实战检测</h3>
-            <div className="bg-gray-50 rounded-2xl p-6 border-2 border-gray-200 mb-6 relative">
-              <p className="text-[#1a1a2e] font-medium leading-relaxed mb-6 whitespace-pre-wrap">
-                {isAiContent ? aiData.questionText : '在 △ABC 中，D 为 AB 边上的中点，已知 AC = 8，BC = 6。为了求 CD 的取值范围，第一步最稳妥的辅助线应该怎么画？'}
-              </p>
-              
-              <div className="space-y-3 mt-4">
-                {(isAiContent ? aiData.options : ['过 D 作 DE // BC', '延长 CD 至 E，使 DE = CD，连接 AE, BE', '过 C 作 CF ⊥ AB', '作 BC 的垂直平分线']).map((option, idx) => (
-                  <button
-                    key={idx}
-                    onClick={() => setCombatAnswer(option)}
-                    className={`w-full text-left p-4 rounded-xl border-2 font-bold transition-all ${
-                      combatAnswer === option 
-                        ? 'border-[var(--color-primary)] bg-[var(--color-primary)]/10 text-[var(--color-primary)] shadow-[2px_2px_0_var(--color-primary)]' 
-                        : 'border-gray-200 hover:border-gray-300 text-gray-600'
-                    }`}
-                  >
-                    {String.fromCharCode(65 + idx)}. {option}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        </div>
-        
-        <div className="p-4 bg-white border-t-2 border-gray-100 pb-safe">
-          <button 
-            disabled={!combatAnswer}
-            onClick={() => setCurrentScreen('combat-feedback')}
-            className={`game-btn text-white w-full py-4 text-lg flex justify-center items-center gap-2 ${
-              combatAnswer ? 'bg-[var(--color-primary)]' : 'bg-gray-300 cursor-not-allowed border-gray-400 border-b-4'
-            }`}
-          >
-            提交校验 <ChevronRight />
-          </button>
-        </div>
-      </motion.div>
+        <CombatFlow
+          phase={phase}
+          aiMode={aiMode}
+          aiData={aiData}
+          combatAnswer={combatAnswer}
+          practiceQueueLength={practiceQueue.length}
+          practiceIndex={practiceIndex}
+          isCorrect={isCorrect}
+          continueLabel={continueLabel}
+          onAnswerChange={setCombatAnswer}
+          onExit={() => setCurrentScreen('dashboard')}
+          onSubmit={() => setCurrentScreen('combat-feedback')}
+          onRetry={() => {
+            void (async () => {
+              if (isAiContent && user) {
+                await saveErrorRecord(user.uid, aiData);
+                await refreshKnowledgeGraph(user.uid);
+              } else if (isAiContent && demoMode) {
+                setErrorList((current) => [{ ...aiData, id: `demo-added-${Date.now()}`, status: 'active' }, ...current]);
+              }
+              setCurrentScreen('combat');
+              setCombatAnswer('');
+            })();
+          }}
+          onContinue={() => {
+            void (async () => {
+              handleTimeSavedUpdate(15);
+              if (isAiContent && (aiData as any)._errorId) {
+                if (user) {
+                  await resolveError(user.uid, (aiData as any)._errorId);
+                  await loadErrors();
+                } else if (demoMode) {
+                  setErrorList((current) => current.filter((item) => item.id !== (aiData as any)._errorId));
+                }
+                await markTaskComplete('error-revive');
+                await markTaskComplete('stability-round');
+              }
+              if (practiceQueue.length > 1 && practiceIndex < practiceQueue.length - 1) {
+                const nextIndex = practiceIndex + 1;
+                setPracticeIndex(nextIndex);
+                setCombatAnswer('');
+                await generateCloneQuestion(practiceQueue[nextIndex]);
+                return;
+              }
+              setCurrentScreen('report');
+              setAiMode('idle');
+              setAiData(null);
+              setCombatAnswer('');
+              setPracticeQueue([]);
+              setPracticeIndex(0);
+            })();
+          }}
+        />
+      </Suspense>
     );
   };
 
   const renderDehydrator = () => {
-    if (dehydrateMode === 'analyzing') {
-      return (
-        <motion.div 
-          key="analyze-dehydrate"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
-          className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-[#1a1a2e] text-white"
-        >
-          <div className="absolute top-6 left-6 z-50">
-            <button onClick={() => setCurrentScreen('dashboard')} className="text-gray-400 hover:text-white p-2">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-            </button>
-          </div>
-          <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/matrix-stampa.png')] opacity-20 animate-pulse"></div>
-          <motion.div
-            animate={{ rotate: -360, scale: [1, 1.2, 1] }}
-            transition={{ duration: 2, repeat: Infinity, ease: "linear" }}
-            className="mb-8 relative z-10 text-[var(--color-secondary)]"
-          >
-            <Cpu size={100} />
-          </motion.div>
-          <h2 className="text-3xl font-display font-bold mb-4 relative z-10 text-[var(--color-secondary)] drop-shadow-[0_0_10px_var(--color-secondary)]">暴风脱水中...</h2>
-          <div className="w-72 space-y-3 relative z-10">
-             <div className="flex items-center gap-2 font-bold text-gray-300"><Check className="text-[var(--color-accent-green)]" size={18}/> 扫描整卷知识点矩阵</div>
-             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 1 }} className="flex items-center gap-2 font-bold text-gray-300"><Check className="text-[var(--color-accent-green)]" size={18}/> 计算 115 分边界 ROI 极值</motion.div>
-             <motion.div initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ delay: 2 }} className="flex items-center gap-2 font-bold text-[var(--color-accent-pink)]"><Zap size={18}/> 废除无效机械惩罚任务</motion.div>
-          </div>
-        </motion.div>
-      );
-    }
-
-    const data = dehydrateData;
-    if (!data) return null;
-
-    const savedMins = (data.trashEasy + data.dropHard) * 5;
-
     return (
-      <motion.div 
-        key="dehydrate-result"
-        initial={{ opacity: 0, y: 50 }}
-        animate={{ opacity: 1, y: 0 }}
-        exit={{ opacity: 0, y: 50 }}
-        className="absolute inset-0 w-full h-full flex flex-col bg-[#1a1a2e] text-white overflow-y-auto"
+      <Suspense
+        fallback={renderFeatureLoading('脱水模块装配中', '正在挂载脱水流、战略规划卡和执行确认面板...')}
       >
-        <div className="p-6 pt-12 pb-24 max-w-lg mx-auto w-full relative">
-          <div className="absolute top-0 right-0 w-64 h-64 bg-[var(--color-secondary)] opacity-10 blur-[100px] rounded-full"></div>
-          
-          <h2 className="text-4xl font-display font-bold text-[var(--color-secondary)] mb-2 flex items-center gap-3">
-            <ShieldAlert size={36} /> 脱水完毕
-          </h2>
-          <p className="text-gray-400 font-bold mb-8">
-            传统教育会让你把 {data.total} 题全做完。我帮你砸碎了其中 {data.trashEasy + data.dropHard} 题。
-          </p>
-
-          {/* Stats Bar */}
-          <div className="bg-white/10 rounded-2xl p-4 border border-white/20 mb-6 font-mono grid grid-cols-3 gap-2 text-center divide-x divide-white/10">
-            <div>
-              <div className="text-3xl font-bold text-[var(--color-accent-pink)]">{data.dropHard}</div>
-              <div className="text-[10px] text-gray-400 font-bold uppercase mt-1">超纲放弃 (Drop)</div>
-            </div>
-            <div>
-              <div className="text-3xl font-bold text-gray-500">{data.trashEasy}</div>
-              <div className="text-[10px] text-gray-400 font-bold uppercase mt-1">机械重复 (Trash)</div>
-            </div>
-            <div>
-              <div className="text-3xl font-bold text-[var(--color-accent-green)]">{data.mustDo}</div>
-              <div className="text-[10px] text-[var(--color-accent-green)] font-bold uppercase mt-1">高悬赏区 (Must Do)</div>
-            </div>
-          </div>
-
-          <div className="bg-[var(--color-secondary)] text-[#1a1a2e] rounded-xl p-5 mb-8 border-4 border-[#1a1a2e] shadow-[4px_4px_0_rgba(255,255,255,0.2)]">
-            <h3 className="font-black text-xl mb-2 flex items-center gap-2"><Trophy size={20} /> AI 核心指令：</h3>
-            <p className="font-bold leading-relaxed">{data.reasoning}</p>
-          </div>
-
-          <div className="border-l-4 border-[var(--color-accent-green)] pl-4 mb-10">
-            <h4 className="text-sm font-bold text-gray-400 mb-1">你今晚只需要完成以下题目：</h4>
-            <div className="text-2xl font-black text-white">{data.mustDoIndices || '无，全部免做！'}</div>
-          </div>
-
-          <div className="bg-[var(--color-accent-pink)]/20 border border-[var(--color-accent-pink)] rounded-xl p-4 flex gap-3 text-[var(--color-accent-pink)] mb-10">
-            <Lock size={24} className="shrink-0" />
-            <p className="text-sm font-bold mt-1">
-              注意：其它题型已被强行列入【战略放弃区】，系统禁止你在这上面浪费时间去换取那微茫的分数。
-            </p>
-          </div>
-
-        </div>
-
-        <div className="fixed bottom-0 left-0 right-0 p-4 bg-[#1a1a2e]/90 backdrop-blur pb-safe text-center w-full max-w-md mx-auto z-50 border-t border-white/10">
-          <p className="text-[var(--color-secondary)] font-bold mb-3">为你的青春挽回了 {savedMins} 分钟</p>
-          <button 
-            onClick={async () => {
+        <DehydratorFlow
+          dehydrateMode={dehydrateMode}
+          dehydrateData={dehydrateData}
+          targetScore={targetScore}
+          onExit={() => setCurrentScreen('dashboard')}
+          onApprove={() => {
+            void (async () => {
               await markTaskComplete('dehydrate-homework');
               setCurrentScreen('dashboard');
               setDehydrateMode('idle');
               setDehydrateData(null);
-            }}
-            className="game-btn bg-[var(--color-secondary)] text-[#1a1a2e] w-full py-4 text-lg border-2 border-transparent"
-          >
-            批准执行，生成免做凭证
-          </button>
-        </div>
-      </motion.div>
-    );
-  };
-  const renderCombatFeedback = () => {
-    const isAiContent = aiMode === 'ready' && aiData;
-    const isCorrect = isAiContent ? combatAnswer === aiData.correctAnswer : combatAnswer === '延长 CD 至 E，使 DE = CD，连接 AE, BE';
-    
-    if (!isCorrect) {
-      return (
-        <motion.div 
-          key="socratic-feedback"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="absolute inset-0 w-full h-full flex flex-col bg-[#0a0a0a] text-[#00ff41] p-6 text-left font-mono"
-        >
-          <div className="absolute inset-0 bg-[url('https://www.transparenttextures.com/patterns/black-scales.png')] opacity-20"></div>
-          
-          <div className="flex-1 w-full max-w-sm mx-auto relative z-10 flex flex-col pt-12">
-            <motion.div 
-              initial={{ y: 20, opacity: 0 }} 
-              animate={{ y: 0, opacity: 1 }} 
-              transition={{ delay: 0.1 }}
-              className="mb-6 font-bold"
-            >
-              {">"} ERROR: LOGIC BREACH DETECTED.
-            </motion.div>
-            
-            <motion.div 
-              initial={{ y: 20, opacity: 0 }} 
-              animate={{ y: 0, opacity: 1 }} 
-              transition={{ delay: 0.8 }}
-              className="mb-6 font-bold text-gray-400"
-            >
-              {">"} INITIATING SOCRATIC INCEPTION...
-            </motion.div>
-
-            <motion.div 
-              initial={{ opacity: 0 }} 
-              animate={{ opacity: 1 }} 
-              transition={{ delay: 1.5 }}
-              className="mb-8 border-l-4 border-[#00ff41] pl-4 text-lg"
-            >
-              <p className="mb-2">"Wake up. You chose <span className="text-[#ff003c]">{combatAnswer || 'an incorrect path'}</span>."</p>
-              <p className="text-white mt-4 leading-relaxed">
-                {isAiContent ? aiData.rule : 'The key is "midpoint (中点)". If you have a midpoint, what happens if you double the median line?'}
-              </p>
-              <p className="text-xs text-gray-500 mt-4">_ System has logged this into your Error Resurrection Queue.</p>
-            </motion.div>
-
-            <div className="mt-auto mb-8">
-              <button 
-                onClick={async () => {
-                   if (isAiContent && user) {
-                     await saveErrorRecord(user.uid, aiData);
-                   } else if (isAiContent && demoMode) {
-                     setErrorList((current) => [{ ...aiData, id: `demo-added-${Date.now()}`, status: 'active' }, ...current]);
-                   }
-                   setCurrentScreen('combat');
-                   setCombatAnswer('');
-                }}
-                className="w-full bg-transparent border-2 border-[#00ff41] text-[#00ff41] py-4 font-bold uppercase tracking-widest hover:bg-[#00ff41] hover:text-black transition-colors"
-              >
-                [ Retry Override ]
-              </button>
-            </div>
-          </div>
-        </motion.div>
-      );
-    }
-
-    return (
-      <motion.div 
-        key="feedback-success"
-        initial={{ opacity: 0, y: 50 }}
-        animate={{ opacity: 1, y: 0 }}
-        className="absolute inset-0 w-full h-full flex flex-col bg-[var(--color-accent-green)] text-[#1a1a2e] justify-center items-center p-6 text-center"
-      >
-        <div className="absolute top-0 right-0 p-10 opacity-20">
-          <SparkleIcon size={120} />
-        </div>
-        
-        <motion.div 
-          initial={{ scale: 0 }}
-          animate={{ scale: 1, rotate: [0, -10, 10, 0] }}
-          transition={{ type: "spring", stiffness: 200, damping: 10 }}
-          className="bg-white rounded-full w-28 h-28 flex items-center justify-center border-4 border-[#1a1a2e] shadow-[4px_4px_0_#1a1a2e] mb-8 z-10 text-[var(--color-accent-green)]"
-        >
-          <Check size={56} strokeWidth={4} />
-        </motion.div>
-
-        <h2 className="font-display text-4xl font-bold mb-4 relative z-10 retro-text-shadow text-white">
-          正确！修复成功
-        </h2>
-        <p className="text-lg font-bold mb-8 bg-white/20 text-[#1a1a2e] p-4 rounded-2xl border-2 border-[#1a1a2e] relative z-10 shadow-[4px_4px_0_#1a1a2e]">
-          {isAiContent ? '完美应用法则成功破茧，你已完全掌握这道题的核心陷阱！' : '识别到了中点，选择“倍长中线”造全等，思路非常完美。这 4 分你拿稳了！'}
-        </p>
-
-        <div className="flex gap-4 w-full max-w-sm relative z-10 mt-8">
-          <button 
-            onClick={async () => {
-               // Award points and save
-               handleTimeSavedUpdate(15);
-               if (isAiContent && (aiData as any)._errorId) {
-                 if (user) {
-                   await resolveError(user.uid, (aiData as any)._errorId);
-                   await loadErrors();
-                 } else if (demoMode) {
-                   setErrorList((current) => current.filter((item) => item.id !== (aiData as any)._errorId));
-                 }
-                 await markTaskComplete('error-revive');
-                 await markTaskComplete('stability-round');
-               }
-               if (practiceQueue.length > 1 && practiceIndex < practiceQueue.length - 1) {
-                 const nextIndex = practiceIndex + 1;
-                 setPracticeIndex(nextIndex);
-                 setCombatAnswer('');
-                 await generateCloneQuestion(practiceQueue[nextIndex]);
-                 return;
-               }
-               setCurrentScreen('report');
-               setAiMode('idle');
-               setAiData(null);
-               setCombatAnswer('');
-               setPracticeQueue([]);
-               setPracticeIndex(0);
-            }}
-            className="game-btn bg-white text-[#1a1a2e] flex-1 py-4 text-lg"
-          >
-            {practiceQueue.length > 1 && practiceIndex < practiceQueue.length - 1 ? '进入下一题' : '收下战利品'}
-          </button>
-        </div>
-      </motion.div>
+            })();
+          }}
+        />
+      </Suspense>
     );
   };
 
   const renderInteractiveTheater = () => {
-    if (theaterMode === 'generating') {
-      return (
-        <motion.div 
-          key="theater-gen"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          className="absolute inset-0 w-full h-full flex flex-col items-center justify-center bg-black text-white p-6"
-        >
-          <div className="text-center">
-            <motion.div 
-              animate={{ rotate: 360, scale: [1, 1.2, 1] }} 
-              transition={{ repeat: Infinity, duration: 2 }}
-              className="text-fuchsia-500 mb-6 flex justify-center"
-            >
-              <Orbit size={80} strokeWidth={1} />
-            </motion.div>
-            <h2 className="font-display font-black text-2xl tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-fuchsia-400 to-purple-600 mb-4">MÖBIUS ENGINE INITIALIZING</h2>
-            <p className="text-gray-400 font-mono text-xs">Generating Seedance 2.0 Dynamic Video Stream...</p>
-            <p className="text-gray-500 font-mono text-[10px] mt-2">Compiling cognitive state... [Frustration: {cogState.frustration}, Focus: {cogState.focus}]</p>
-            {theaterMeta && (
-              <p className="text-gray-500 font-mono text-[10px] mt-2">
-                Source: {theaterMeta.source} {theaterMeta.provider ? `// Provider: ${theaterMeta.provider}` : ''}
-              </p>
-            )}
-          </div>
-        </motion.div>
-      );
-    }
-
-    if (!theaterScript) return null;
-
-    const displayVideoUrl = theaterMeta?.activeVideoUrl;
-    const hasReadyVideo = Boolean(
-      theaterMeta?.source === 'mobius' &&
-      displayVideoUrl,
-    );
-    const isVideoPending = Boolean(
-      theaterMeta?.source === 'mobius' &&
-      theaterMeta?.videoStatus &&
-      ['queued', 'processing'].includes(theaterMeta.videoStatus),
-    );
-    const isBranchTransitionPending = Boolean(
-      theaterMode === 'resolution' &&
-      theaterMeta?.source === 'mobius' &&
-      theaterMeta?.branchOutcome &&
-      isVideoPending,
-    );
-
     return (
-      <motion.div 
-        key="theater-play"
-        initial={{ opacity: 0, scale: 1.1 }}
-        animate={{ opacity: 1, scale: 1 }}
-        exit={{ opacity: 0 }}
-        className="absolute inset-0 w-full h-full flex flex-col bg-black overflow-hidden font-sans"
+      <Suspense
+        fallback={renderFeatureLoading('剧场世界线装配中', '正在加载分支播放器、裁决面板与异步状态卡片...')}
       >
-        <div className="flex-1 relative overflow-hidden flex flex-col items-center justify-center">
-          <div className={`absolute inset-0 z-0 ${hasReadyVideo ? 'bg-black' : 'bg-gradient-to-b from-indigo-900/40 to-black'}`}></div>
-          <div className="absolute top-5 left-5 z-40">
-            <button
-              type="button"
-              onClick={() => setCurrentScreen('dashboard')}
-              className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/55 px-3 py-2 text-[11px] font-mono text-white backdrop-blur-sm transition hover:border-cyan-300/60 hover:text-cyan-100"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M18 6L6 18M6 6l12 12"/></svg>
-              <span>强制退出 EXIT</span>
-            </button>
-          </div>
-          <div className="absolute top-5 right-5 z-40">
-            <button
-              type="button"
-              onClick={() => { void toggleTheaterCueEnabled(); }}
-              className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-black/55 px-3 py-2 text-[11px] font-mono text-white backdrop-blur-sm transition hover:border-cyan-300/60 hover:text-cyan-100"
-            >
-              {theaterCueEnabled ? <Volume2 size={14} /> : <VolumeX size={14} />}
-              <span>{theaterCueEnabled ? 'Cue Sound On' : 'Cue Sound Off'}</span>
-            </button>
-          </div>
-          
-          <div className="relative z-10 w-[95%] h-[90%] border-4 border-white/20 p-2 transform rotate-1">
-            <div className="w-full h-full border-4 border-white overflow-hidden relative bg-[#111]">
-               {hasReadyVideo && (
-                 <>
-                   {React.createElement(ReactPlayer as any, {
-                     key: displayVideoUrl,
-                     url: displayVideoUrl,
-                     className: "absolute inset-0",
-                     width: "100%",
-                     height: "100%",
-                     playing: true,
-                     muted: true,
-                     loop: true,
-                     playsinline: true,
-                     controls: true,
-                     onError: () => {
-                       setTheaterMeta((current) => current ? {
-                         ...current,
-                         videoStatus: 'failed',
-                         errorMessage: '视频流化失败，已启动大列表长缓冲池自动回退到极客文本剧场。',
-                       } : current);
-                     }
-                   })}
-                   <div className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent z-10 pointer-events-none"></div>
-                 </>
-               )}
-               <AnimatePresence>
-                 {theaterCutFxActive && (
-                   <motion.div
-                     key="branch-cut-fx"
-                     initial={{ opacity: 0 }}
-                     animate={{ opacity: 1 }}
-                     exit={{ opacity: 0 }}
-                     transition={{ duration: 0.14 }}
-                     className="absolute inset-0 z-30 pointer-events-none overflow-hidden"
-                   >
-                     <div className="absolute inset-0 bg-white/85 mix-blend-screen" />
-                     <div className="absolute inset-0 bg-gradient-to-b from-cyan-300/70 via-fuchsia-500/25 to-transparent" />
-                     <motion.div
-                       initial={{ x: '-100%' }}
-                       animate={{ x: '100%' }}
-                       transition={{ duration: 0.24, ease: 'easeInOut' }}
-                       className="absolute inset-y-0 w-1/3 bg-gradient-to-r from-transparent via-cyan-200/90 to-transparent blur-md"
-                     />
-                     <motion.div
-                       initial={{ opacity: 0 }}
-                       animate={{ opacity: [0, 1, 0.35] }}
-                       transition={{ duration: 0.24 }}
-                       className="absolute inset-0"
-                       style={{
-                         backgroundImage:
-                           'repeating-linear-gradient(180deg, rgba(255,255,255,0.18) 0px, rgba(255,255,255,0.18) 2px, transparent 2px, transparent 7px)',
-                       }}
-                     />
-                   </motion.div>
-                 )}
-               </AnimatePresence>
-               
-               <motion.div 
-                 initial={{ y: 50, opacity: 0 }}
-                 animate={{ y: 0, opacity: 1 }}
-                 className={`absolute inset-0 ${hasReadyVideo ? 'z-20' : ''} flex items-center justify-center p-8 text-center`}
-               >
-                 {theaterMode === 'playing' && (
-                   <div className="space-y-6">
-                     <p className={`font-bold italic text-white drop-shadow-lg leading-relaxed ${hasReadyVideo ? 'text-xl md:text-2xl max-w-md mx-auto bg-black/45 backdrop-blur-sm p-4 rounded-2xl border border-white/15' : 'text-2xl'}`}>
-                       "{theaterScript.sceneIntro}"
-                     </p>
-                     <p className="text-fuchsia-400 font-mono text-sm">[ E.M.A Companion Status: <span className="uppercase">{theaterScript.emotion}</span> ]</p>
-                     {theaterMeta && (
-                       <div className={`text-[11px] font-mono space-y-1 ${hasReadyVideo ? 'text-gray-200' : 'text-gray-400'}`}>
-                         <p>[ Source: {theaterMeta.source.toUpperCase()} ]</p>
-                         {theaterMeta.provider && <p>[ Video Provider: {theaterMeta.provider.toUpperCase()} ]</p>}
-                         {theaterMeta.providerJobId && <p>[ Provider Job ID: {theaterMeta.providerJobId} ]</p>}
-                         {theaterMeta.videoStatus && <p>[ Video Status: {theaterMeta.videoStatus.toUpperCase()} ]</p>}
-                         {theaterMeta.contentKnowledgePointTitle && (
-                           <p>[ Knowledge Point: {theaterMeta.contentKnowledgePointTitle} {theaterMeta.contentKnowledgePointGrade ? `// ${theaterMeta.contentKnowledgePointGrade}` : ''} ]</p>
-                         )}
-                        {theaterMeta.relatedQuestionSummary?.length ? (
-                          <p>[ Similar Questions: {theaterMeta.relatedQuestionSummary.join(' | ')} ]</p>
-                        ) : null}
-                        {theaterMeta.knowledgeActionLabel && (
-                          <p>[ Knowledge Action: {theaterMeta.knowledgeActionLabel}{theaterMeta.knowledgeActionType ? ` // ${theaterMeta.knowledgeActionType}` : ''} ]</p>
-                        )}
-                        {theaterMeta.diagnosedMistakeLabels?.length ? (
-                          <p>[ Diagnosed Mistakes: {theaterMeta.diagnosedMistakeLabels.join(' | ')} ]</p>
-                        ) : null}
-                        {theaterMeta.errorMessage && <p>[ Note: {theaterMeta.errorMessage} ]</p>}
-                       </div>
-                     )}
-                     {hasReadyVideo && (
-                       <p className="text-xs text-cyan-200 font-mono">
-                         视频已就绪，当前为真实播放态。
-                       </p>
-                     )}
-                   </div>
-                 )}
-                 {theaterMode === 'interaction' && (
-                    <div className="space-y-8 bg-black/80 p-8 rounded-3xl border border-fuchsia-500/50 backdrop-blur-sm">
-                     <p className="text-2xl font-bold text-fuchsia-400 drop-shadow-[0_0_10px_rgba(232,121,249,0.8)] animate-pulse">
-                       AWAITING YOUR OVERRIDE:
-                     </p>
-                     <p className="text-xl text-white font-medium">"{theaterScript.interactionPrompt}"</p>
-                     {theaterMeta?.videoUrl && (
-                       <p className="text-xs text-gray-400 font-mono break-all">
-                         Preview Asset: {theaterMeta.videoUrl}
-                       </p>
-                     )}
-                     {isVideoPending && (
-                       <p className="text-xs text-cyan-300 font-mono">
-                         视频仍在生成中，前端正自动轮询最新状态...
-                       </p>
-                     )}
-                     {hasReadyVideo && (
-                       <p className="text-xs text-cyan-300 font-mono">
-                         视频已切入真实播放，你现在看到的是生成结果上的交互叠层。
-                       </p>
-                     )}
-                     <div className="max-w-md mx-auto rounded-2xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-4 text-left space-y-3">
-                       <p className="text-xs text-cyan-200 font-mono">JUDGE INPUT // STRUCTURED ACTION SUBMISSION</p>
-                       <div className="flex items-center justify-between gap-4">
-                         <span className="text-sm text-white font-medium">我完成了这个知识动作</span>
-                         <button
-                           type="button"
-                           onClick={() => setTheaterActionCompleted((value) => !value)}
-                           className={`game-btn px-4 py-2 text-sm ${theaterActionCompleted ? 'bg-emerald-400 text-[#1a1a2e]' : 'bg-transparent border-2 border-gray-500 text-gray-300'}`}
-                         >
-                           {theaterActionCompleted ? '已完成' : '未完成'}
-                         </button>
-                       </div>
-                       <div>
-                         <p className="text-xs text-gray-300 font-mono mb-2">SELF CHECK</p>
-                         <div className="flex flex-wrap gap-2">
-                           {[
-                             { key: 'aligned', label: '完全对齐' },
-                             { key: 'partial', label: '部分命中' },
-                             { key: 'guess', label: '更像猜测' },
-                           ].map((item) => (
-                             <button
-                               key={item.key}
-                               type="button"
-                               onClick={() => setTheaterSelfCheck(item.key as 'aligned' | 'partial' | 'guess')}
-                               className={`game-btn px-3 py-2 text-xs ${theaterSelfCheck === item.key ? 'bg-cyan-300 text-[#1a1a2e]' : 'bg-transparent border-2 border-gray-500 text-gray-300'}`}
-                             >
-                               {item.label}
-                             </button>
-                           ))}
-                         </div>
-                       </div>
-                       <div>
-                         <p className="text-xs text-gray-300 font-mono mb-2">CONFIDENCE</p>
-                         <div className="flex flex-wrap gap-2">
-                           {[
-                             { key: 'low', label: '低' },
-                             { key: 'medium', label: '中' },
-                             { key: 'high', label: '高' },
-                           ].map((item) => (
-                             <button
-                               key={item.key}
-                               type="button"
-                               onClick={() => setTheaterConfidence(item.key as InteractionConfidence)}
-                               className={`game-btn px-3 py-2 text-xs ${theaterConfidence === item.key ? 'bg-amber-300 text-[#1a1a2e]' : 'bg-transparent border-2 border-gray-500 text-gray-300'}`}
-                             >
-                               {item.label}
-                             </button>
-                           ))}
-                         </div>
-                       </div>
-                       <div>
-                         <p className="text-xs text-gray-300 font-mono mb-2">ACTION PANEL // {theaterMeta?.knowledgeActionType?.toUpperCase() ?? 'GENERIC'}</p>
-                         {(theaterMeta?.knowledgeActionType ?? 'select') === 'select' && (
-                           <div className="grid gap-2">
-                             {SELECT_ACTION_OPTIONS.map((item) => (
-                               <button
-                                 key={item.id}
-                                 type="button"
-                                 onClick={() => setTheaterSelectedOption(item.id)}
-                                 className={`game-btn px-3 py-3 text-sm text-left ${
-                                   theaterSelectedOption === item.id
-                                     ? 'bg-fuchsia-300 text-[#1a1a2e]'
-                                     : 'bg-transparent border-2 border-gray-500 text-gray-200'
-                                 }`}
-                               >
-                                 {item.label}
-                               </button>
-                             ))}
-                           </div>
-                         )}
-                         {theaterMeta?.knowledgeActionType === 'sequence' && (
-                           <div className="space-y-2">
-                             {theaterSequence.map((step, index) => (
-                               <button
-                                 key={`${step}-${index}`}
-                                 type="button"
-                                 onClick={() => rotateSequenceStep(index)}
-                                 className="game-btn w-full px-3 py-3 text-sm text-left bg-transparent border-2 border-gray-500 text-gray-200"
-                               >
-                                 Step {index + 1}: {step}
-                               </button>
-                             ))}
-                             <p className="text-[11px] text-cyan-100 font-mono">点击步骤可与下一步交换顺序，排出你认为正确的动作链。</p>
-                           </div>
-                         )}
-                         {(theaterMeta?.knowledgeActionType === 'draw' || theaterMeta?.knowledgeActionType === 'drag') && (
-                           <div className="space-y-2">
-                             <div className="grid grid-cols-1 gap-2">
-                               {DRAW_ACTION_CHECKPOINTS.map((checkpoint) => (
-                                 <button
-                                   key={checkpoint}
-                                   type="button"
-                                   onClick={() => toggleDrawCheckpoint(checkpoint)}
-                                   className={`game-btn px-3 py-3 text-sm text-left ${
-                                     theaterDrawCheckpoints.includes(checkpoint)
-                                       ? 'bg-cyan-300 text-[#1a1a2e]'
-                                       : 'bg-transparent border-2 border-gray-500 text-gray-200'
-                                   }`}
-                                 >
-                                   {theaterDrawCheckpoints.includes(checkpoint) ? '[ Locked ]' : '[ Tap ]'} {checkpoint}
-                                 </button>
-                               ))}
-                             </div>
-                             <p className="text-[11px] text-cyan-100 font-mono">用“点亮关键节点”的方式模拟描线/拖拽路径。</p>
-                           </div>
-                         )}
-                       </div>
-                     </div>
-
-                     <div className="flex flex-col gap-4 pt-4">
-                       <button
-                         disabled={theaterDecisionPending}
-                         onClick={() => { handleTheaterResolution(); }}
-                         className="game-btn bg-fuchsia-600 text-white py-4 border-2 border-white shadow-[4px_4px_0_#fff]"
-                       >
-                         {theaterDecisionPending ? '[ Resolving ]' : '[ Submit Action ] // Judge via Mobius'}
-                       </button>
-                       <button
-                         disabled={theaterDecisionPending}
-                         onClick={() => { handleTheaterResolution('failure'); }}
-                         className="game-btn bg-transparent border-2 border-gray-600 text-gray-400 py-3"
-                       >
-                         [ Ignore Rule ] // Fail
-                       </button>
-                     </div>
-                   </div>
-                 )}
-                 {theaterMode === 'resolution' && (
-                   <div className="space-y-6">
-                    <p className={`text-3xl font-black italic ${theaterResolution === 'success' ? 'text-[var(--color-accent-green)]' : 'text-[var(--color-accent-pink)]'}`}>
-                      {theaterMeta?.resolutionTitle ?? (theaterResolution === 'success' ? 'MISSION ACCOMPLISHED' : 'SYSTEM COLLAPSE')}
-                    </p>
-                    <p className="text-xl text-white font-bold leading-relaxed">
-                      {theaterResolution === 'success' ? theaterScript.successScene : theaterScript.failureScene}
-                    </p>
-                    {theaterMeta?.source === 'mobius' && theaterMeta?.branchOutcome && (
-                      <p className="text-xs text-cyan-300 font-mono">
-                        Branch video: {theaterMeta.branchOutcome.toUpperCase()} // {theaterMeta.videoStatus?.toUpperCase() ?? 'UNKNOWN'}
-                      </p>
-                    )}
-                    {isBranchTransitionPending && (
-                      <div className="max-w-md mx-auto rounded-2xl border border-cyan-400/40 bg-cyan-500/10 px-4 py-3 text-left">
-                        <p className="text-sm font-mono text-cyan-200">
-                          正在切入 {theaterMeta?.branchOutcome === 'success' ? 'SUCCESS' : 'FAILURE'} 分支片段...
-                        </p>
-                        <p className="mt-2 text-xs font-mono text-cyan-100/90">
-                          当前继续保持上一段已就绪视频播放，分支素材 ready 后会自动无缝切换。
-                        </p>
-                      </div>
-                    )}
-                    {theaterMeta?.source === 'mobius' && theaterMeta?.branchOutcome && theaterMeta?.videoStatus === 'ready' && (
-                      <p className="text-xs text-emerald-300 font-mono">
-                        {theaterMeta.branchOutcome.toUpperCase()} 分支片段已切入播放。
-                      </p>
-                    )}
-                    {theaterCutFxActive && (
-                      <p className="text-xs text-fuchsia-200 font-mono tracking-[0.25em]">
-                        WORLDLINE SHIFT DETECTED
-                      </p>
-                    )}
-                    {theaterReadyCueActive && (
-                      <motion.p
-                        initial={{ opacity: 0.4, scale: 0.96 }}
-                        animate={{ opacity: [0.4, 1, 0.65], scale: [0.96, 1.02, 1] }}
-                        transition={{ duration: 0.45 }}
-                        className="text-xs text-cyan-100 font-mono tracking-[0.22em]"
-                      >
-                        SYNC CUE // BRANCH LOCK ACQUIRED
-                      </motion.p>
-                    )}
-                    {!theaterCueEnabled && (
-                      <p className="text-[11px] text-gray-400 font-mono">
-                        Cue sound muted for this theater session.
-                      </p>
-                    )}
-                    {theaterMeta?.coachMessage && (
-                      <p className="text-sm text-cyan-200 font-mono max-w-md mx-auto">
-                        {theaterMeta.coachMessage}
-                       </p>
-                     )}
-                    {theaterMeta?.adjudicationRationale?.length ? (
-                      <div className="max-w-md mx-auto rounded-2xl border border-cyan-400/30 bg-cyan-500/10 px-4 py-3 text-left">
-                        <p className="text-xs text-cyan-200 font-mono">ADJUDICATION RATIONALE</p>
-                        <div className="mt-2 space-y-1 text-[11px] text-gray-200 font-mono">
-                          {theaterMeta.adjudicationRationale.map((item) => (
-                            <p key={item}>[{item}]</p>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                    {theaterMeta?.contentKnowledgePointTitle && (
-                      <div className="max-w-md mx-auto rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-left">
-                        <p className="text-xs text-amber-200 font-mono">
-                          内容底座已锁定知识点：{theaterMeta.contentKnowledgePointTitle}
-                          {theaterMeta.contentKnowledgePointGrade ? ` // ${theaterMeta.contentKnowledgePointGrade}` : ''}
-                        </p>
-                        {theaterMeta.contentEvidence?.length ? (
-                          <div className="mt-2 space-y-1 text-[11px] text-gray-300 font-mono">
-                            {theaterMeta.contentEvidence.map((item) => (
-                              <p key={item}>[{item}]</p>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-                    )}
-                     {theaterMeta?.nextActions?.length ? (
-                       <div className="text-xs text-gray-300 font-mono max-w-md mx-auto space-y-1">
-                         {theaterMeta.nextActions.map((item) => (
-                           <p key={item}>[{item}]</p>
-                         ))}
-                       </div>
-                     ) : null}
-                     <button onClick={() => setCurrentScreen('dashboard')} className="mt-12 game-btn bg-white text-black py-3 px-8 text-lg hover:bg-gray-200">
-                       Exit Simulation
-                     </button>
-                   </div>
-                 )}
-               </motion.div>
-            </div>
-          </div>
-        </div>
-      </motion.div>
+        <InteractiveTheater
+          theaterMode={theaterMode}
+          theaterScript={theaterScript}
+          theaterResolution={theaterResolution}
+          theaterMeta={theaterMeta}
+          cognitiveProjection={currentCognitiveProjection}
+          theaterCueEnabled={theaterCueEnabled}
+          theaterCutFxActive={theaterCutFxActive}
+          theaterReadyCueActive={theaterReadyCueActive}
+          theaterDecisionPending={theaterDecisionPending}
+          theaterActionCompleted={theaterActionCompleted}
+          theaterSelfCheck={theaterSelfCheck}
+          theaterConfidence={theaterConfidence}
+          theaterSelectedOption={theaterSelectedOption}
+          theaterSequence={theaterSequence}
+          theaterDrawCheckpoints={theaterDrawCheckpoints}
+          socraticReplyDraft={socraticReplyDraft}
+          socraticReplyPending={socraticReplyPending}
+          onExit={() => setCurrentScreen('dashboard')}
+          onToggleCue={() => { void toggleTheaterCueEnabled(); }}
+          onVideoError={() => {
+            setTheaterMeta((current) => current ? {
+              ...current,
+              videoStatus: 'failed',
+              errorMessage: '视频流化失败，已启动大列表长缓冲池自动回退到极客文本剧场。',
+              lastMediaSyncAt: new Date().toISOString(),
+            } : current);
+          }}
+          onToggleActionCompleted={() => setTheaterActionCompleted((value) => !value)}
+          onSelfCheckChange={setTheaterSelfCheck}
+          onConfidenceChange={setTheaterConfidence}
+          onSelectOption={setTheaterSelectedOption}
+          onRotateSequenceStep={rotateSequenceStep}
+          onToggleDrawCheckpoint={toggleDrawCheckpoint}
+          onSubmitAction={() => { void handleTheaterResolution(); }}
+          onForceFailure={() => { void handleTheaterResolution('failure'); }}
+          onSocraticReplyDraftChange={setSocraticReplyDraft}
+          onSubmitSocraticReply={() => { void handleSocraticReply(); }}
+          onOpenFoundationNode={(nodeKey) => {
+            setFoundationFocusKey(nodeKey);
+            const targetEngineKey = nodeKey.startsWith('neuroscience.')
+              ? 'mind-engine'
+              : nodeKey.startsWith('language.')
+                ? 'meaning-engine'
+                : 'world-engine';
+            navigateExplore({ engineKey: targetEngineKey, nodeKey });
+          }}
+        />
+      </Suspense>
     );
   };
   const renderReport = () => (
-    <motion.div 
-      key="report"
-      initial={{ opacity: 0 }}
-      animate={{ opacity: 1 }}
-      className="absolute inset-0 w-full h-full flex flex-col bg-[url('https://www.transparenttextures.com/patterns/stardust.png')] bg-[#1a1a2e] text-white p-6 justify-center items-center overflow-hidden"
+    <Suspense
+      fallback={renderFeatureLoading('战报装配中', '正在挂载回收时长海报和结算动作...')}
     >
-      <div className="absolute top-1/4 left-0 w-full h-64 bg-[var(--color-secondary)]/20 blur-[100px] rounded-full"></div>
-      
-      <div className="w-full max-w-sm mx-auto z-10 flex flex-col h-full overflow-y-auto pb-6">
-        <div className="flex-1 flex flex-col justify-center mt-10">
-          <h2 className="text-center font-bold text-[var(--color-secondary)] text-xl tracking-widest mb-6">TIME RETURNED</h2>
-          
-          {/* Viral Poster Element */}
-          <div className="bg-gradient-to-b from-[#2a2a4a] to-[#1a1a2e] border-2 border-[var(--color-secondary)] rounded-[32px] p-8 text-center mb-8 relative shadow-[0_0_30px_rgba(255,138,61,0.2)]">
-            <div className="absolute -top-4 -right-4 bg-[var(--color-primary)] text-white text-xs font-bold px-3 py-1 rounded-full border-2 border-[#1a1a2e] transform rotate-12">
-              超越 95% 同龄人
-            </div>
-            
-            <p className="text-gray-300 font-medium mb-1">今日已收回青春时长</p>
-            <motion.div 
-              initial={{ scale: 0 }}
-              animate={{ scale: 1 }}
-              transition={{ type: 'spring', delay: 0.2 }}
-              className="font-display font-black text-6xl text-[var(--color-secondary)] flex items-end justify-center mb-6 leading-none"
-            >
-              +{timeSaved ? timeSaved : 26}<span className="text-2xl ml-1 text-white pb-2">min</span>
-            </motion.div>
-            
-            <div className="bg-black/30 rounded-xl p-4 text-left border border-white/10 mb-4">
-               <p className="text-sm text-gray-400 mb-1"><Zap size={14} className="inline mr-1 text-[var(--color-primary)]"/> 击碎无用题海：<span className="text-white float-right">15 题</span></p>
-               <p className="text-sm text-gray-400 mb-1"><MapIcon size={14} className="inline mr-1 text-[var(--color-accent-green)]"/> 突破薄弱知识：<span className="text-white float-right">3 个</span></p>
-            </div>
-            
-            <div className="text-xs text-gray-500 mt-2 italic flex justify-center items-center gap-1">
-               <Lock size={12} /> Powered by 列子御风 AI
-            </div>
-          </div>
-          
-          <div className="text-center mb-auto">
-            <p className="text-lg font-bold text-white mb-2 leading-relaxed">
-              “今天省下来的时间，<br/>属于你自己。”
-            </p>
-          </div>
-        </div>
-
-        <div className="mt-8 space-y-3">
-          <button 
-            className="game-btn bg-[var(--color-primary)] text-white w-full py-4 text-xl flex justify-center items-center gap-2 border-2 border-transparent"
-          >
-            <UploadCloud size={20} /> 生成炫耀海报
-          </button>
-          
-          <button 
-            onClick={() => {
-              setCurrentScreen('dashboard');
-            }}
-            className="game-btn bg-white/10 text-white w-full py-4 text-lg border-2 border-transparent flex justify-center items-center gap-2"
-          >
-             返回营地继续休息
-          </button>
-        </div>
-      </div>
-    </motion.div>
+      <ReportView
+        timeSaved={timeSaved}
+        onReturnHome={() => setCurrentScreen('dashboard')}
+      />
+    </Suspense>
   );
 
+  const renderFoundationScience = () => (
+    <Suspense
+      fallback={renderFeatureLoading('基础科学双引擎装配中', '正在挂载物理学、神经科学拓扑卡和跨学科节点...')}
+    >
+      <FoundationScienceView
+        studentId={user?.uid || 'demo-student'}
+        initialNodeKey={foundationFocusKey}
+        onBack={() => setCurrentScreen('dashboard')}
+        onExplorationRecorded={() => {
+          void refreshStudentStateSummary(user?.uid || 'demo-student');
+        }}
+      />
+    </Suspense>
+  );
+
+  const renderExplore = () => (
+    <Suspense
+      fallback={renderFeatureLoading('探索模块装配中', '正在挂载三引擎、机制实验室和跨引擎节点...')}
+    >
+      <ExploreView
+        engineKey={exploreRoute.engineKey}
+        nodeKey={exploreRoute.nodeKey}
+        mistakes={errorList.map(mapErrorToAIActiveMistake)}
+        onNavigate={navigateExplore}
+        onOpenCockpit={navigateExploreCockpit}
+        onBackHome={() => navigateScreen('dashboard')}
+        onOpenErrorBook={() => navigateScreen('error-book')}
+      />
+    </Suspense>
+  );
+
+  const renderExploreCockpit = () => (
+    <Suspense
+      fallback={renderFeatureLoading('御风舱装配中', '正在挂载 ASI、模型指数和御风轨迹...')}
+    >
+      <ExploreCockpitView
+        onOpenExploreHome={() => navigateScreen('explore')}
+        onOpenNode={(engineKey, nodeKey) => {
+          navigateExplore({ engineKey, nodeKey });
+        }}
+      />
+    </Suspense>
+  );
+  const yufengStatusDotClass = getYufengStatusDotClass(yufengTaskState?.status);
+
   return (
-    <div className="w-full h-screen bg-[#1a1a2e] flex items-center justify-center font-sans">
+    <div className="relative flex min-h-screen w-full items-center justify-center overflow-x-hidden bg-[linear-gradient(180deg,#eaf4ff_0%,#edf5ff_48%,#fff7ef_100%)] font-sans">
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_12%,rgba(61,123,255,0.18),transparent_24%),radial-gradient(circle_at_82%_14%,rgba(255,138,61,0.16),transparent_22%),radial-gradient(circle_at_58%_84%,rgba(255,213,74,0.14),transparent_18%)]" />
       <input type="file" accept="image/*" ref={fileInputRef} className="hidden" onChange={handleUploadQuestion} />
       <input type="file" accept="image/*" ref={dehydrateInputRef} className="hidden" onChange={handleDehydrateHomework} />
       {/* Mobile container constraint for web view */}
-      <div className={`${currentScreen === 'welcome' ? 'w-full h-full max-w-none bg-transparent overflow-hidden relative' : 'w-full h-full max-w-md mx-auto bg-white overflow-hidden relative shadow-2xl sm:rounded-[40px] sm:h-[90vh] sm:border-[8px] sm:border-[#1a1a2e]'}`}>
+      <div className={`${currentScreen === 'welcome' ? 'relative h-[100svh] w-full max-w-none overflow-hidden bg-transparent' : 'wind-mobile-shell relative h-[100svh] w-full max-w-md overflow-hidden sm:h-[90vh] sm:rounded-[40px] sm:border-[6px] sm:border-white/70'}`}>
         <AnimatePresence mode="wait">
-          {currentScreen === 'welcome' && renderWelcome()}
-          {currentScreen === 'profile-setup' && renderProfileSetup()}
-          {currentScreen === 'diagnostic-loading' && renderDiagnosticLoading()}
-          {currentScreen === 'target-setter' && renderTargetSetter()}
-          {currentScreen === 'dashboard' && <Dashboard 
-             studentId={user?.uid || 'demo-student'} 
-             onNavigate={(s) => setCurrentScreen(s as ScreenState)} 
-             onReturnHome={() => { setDemoMode(false); setCurrentScreen('welcome'); }}
-             onTriggerUpload={() => fileInputRef.current?.click()}
-             onTriggerDehydrate={() => dehydrateInputRef.current?.click()}
-          />}
+          {currentScreen === 'welcome' && (
+            <Suspense fallback={renderFeatureLoading('风场入口装配中', '正在准备御风营地...')}>
+              <WelcomeScreen
+                authChecking={authChecking}
+                welcomeError={welcomeError}
+                onEnterCamp={handleEnterCamp}
+                onShowOverview={() => setCurrentScreen('overview')}
+                onEnterDemo={enterDemoMode}
+              />
+            </Suspense>
+          )}
+          {currentScreen === 'profile-setup' && (
+            <Suspense fallback={renderFeatureLoading('冒险档案装配中', '正在准备年级与教材设置...')}>
+              <ProfileSetupScreen
+                grade={grade}
+                textbooks={textbooks}
+                onGradeChange={setGrade}
+                onTextbooksChange={setTextbooks}
+                onContinue={async () => {
+                  await saveProfileData({ grade, textbooks });
+                  setCurrentScreen('diagnostic-loading');
+                  setTimeout(() => setCurrentScreen('target-setter'), 3000);
+                }}
+              />
+            </Suspense>
+          )}
+          {currentScreen === 'diagnostic-loading' && (
+            <Suspense fallback={renderFeatureLoading('巡航诊断装配中', '正在准备主线地图...')}>
+              <DiagnosticLoadingScreen />
+            </Suspense>
+          )}
+          {currentScreen === 'target-setter' && (
+            <Suspense fallback={renderFeatureLoading('目标设置装配中', '正在准备今日目标控件...')}>
+              <TargetSetterScreen
+                targetScore={targetScore}
+                onTargetScoreChange={setTargetScore}
+                onSubmit={async () => {
+                  await saveProfileData({ targetScore });
+                  setCurrentScreen('dashboard');
+                }}
+              />
+            </Suspense>
+          )}
+          {currentScreen === 'dashboard' && (
+            <Suspense
+              fallback={renderFeatureLoading('作战面板装配中', '正在挂载今日主线、雷达图和任务卡片...')}
+            >
+              <Dashboard
+                data={dashboardState}
+                loading={dashboardLoading}
+                onNavigate={(s) => setCurrentScreen(s as ScreenState)}
+                onReturnHome={() => { setDemoMode(false); setCurrentScreen('welcome'); }}
+                onTriggerUpload={() => fileInputRef.current?.click()}
+                onTriggerDehydrate={() => dehydrateInputRef.current?.click()}
+              />
+            </Suspense>
+          )}
           {currentScreen === 'subject-map' && renderSubjectMap()}
           {currentScreen === 'error-book' && renderErrorBook()}
           {currentScreen === 'overview' && renderOverview()}
+          {currentScreen === 'foundation-science' && renderFoundationScience()}
+          {currentScreen === 'explore' && renderExplore()}
+          {currentScreen === 'explore-cockpit' && renderExploreCockpit()}
           {currentScreen === 'dehydrator' && renderDehydrator()}
-          {currentScreen === 'combat' && renderCombat()}
-          {currentScreen === 'combat-feedback' && renderCombatFeedback()}
+          {currentScreen === 'combat' && renderCombat('question')}
+          {currentScreen === 'combat-feedback' && renderCombat('feedback')}
           {currentScreen === 'theater' && renderInteractiveTheater()}
           {currentScreen === 'report' && renderReport()}
         </AnimatePresence>
@@ -3037,8 +2699,8 @@ export default function App() {
             className="absolute top-20 right-6 z-40 pointer-events-none"
           >
             <div className="relative">
-              <div className={`w-12 h-12 rounded-full border-2 border-white shadow-lg flex items-center justify-center ${cogState.frustration > 60 ? 'bg-red-500/80 animate-pulse' : cogState.focus > 70 ? 'bg-blue-500/80' : 'bg-fuchsia-500/80'}`}>
-                {cogState.frustration > 60 ? <AlertTriangle size={20} className="text-white" /> : cogState.focus > 70 ? <Zap size={20} className="text-white" /> : <Orbit size={20} className="text-white relative z-10" />}
+              <div className={`w-12 h-12 rounded-full border-2 border-white shadow-lg flex items-center justify-center ${currentCognitiveProjection.emotion < 40 ? 'bg-red-500/80 animate-pulse' : currentCognitiveProjection.signalNoiseRatio > 70 ? 'bg-blue-500/80' : currentCognitiveProjection.time < 45 ? 'bg-orange-500/80' : 'bg-fuchsia-500/80'}`}>
+                {currentCognitiveProjection.emotion < 40 ? <AlertTriangle size={20} className="text-white" /> : currentCognitiveProjection.signalNoiseRatio > 70 ? <Zap size={20} className="text-white" /> : <Orbit size={20} className="text-white relative z-10" />}
               </div>
               <div className="absolute top-14 right-0 w-max bg-black/60 backdrop-blur-sm text-[10px] text-white px-2 py-1 rounded-full border border-white/20">
                 E.M.A. 陪伴中
@@ -3047,12 +2709,20 @@ export default function App() {
           </motion.div>
         )}
         
-        {['dashboard', 'subject-map', 'error-book', 'overview'].includes(currentScreen) && (
-          <div className="absolute bottom-0 left-0 right-0 w-full bg-white border-t-4 border-[#1a1a2e] flex justify-around items-center p-3 sm:pb-4 pt-4 z-20 shadow-[0_-10px_20px_rgba(0,0,0,0.05)]">
-            <NavButton onClick={() => setCurrentScreen('dashboard')} icon={<Sword />} label="作战" active={currentScreen === 'dashboard'} />
-            <NavButton onClick={() => setCurrentScreen('subject-map')} icon={<MapIcon />} label="学科岛" active={currentScreen === 'subject-map'} />
-            <NavButton onClick={() => setCurrentScreen('error-book')} icon={<RefreshCw />} label="错题" active={currentScreen === 'error-book'} />
-            <NavButton onClick={() => setCurrentScreen('overview')} icon={<Trophy />} label="总览" active={currentScreen === 'overview'} />
+        {['dashboard', 'subject-map', 'error-book', 'overview', 'foundation-science', 'explore', 'explore-cockpit'].includes(currentScreen) && (
+          <div className="wind-bottom-nav absolute bottom-0 left-0 right-0 z-20 flex items-center justify-around px-3 pb-3 pt-3 sm:bottom-3 sm:left-3 sm:right-3 sm:rounded-[28px]">
+            <NavButton onClick={() => navigateScreen('dashboard')} icon={<Sword />} label="背包" active={currentScreen === 'dashboard'} />
+            <NavButton onClick={() => navigateScreen('subject-map')} icon={<MapIcon />} label="主线" active={currentScreen === 'subject-map'} />
+            <NavButton onClick={() => navigateScreen('explore')} icon={<Compass />} label="探索" active={currentScreen === 'explore'} />
+            <NavButton onClick={() => navigateScreen('error-book')} icon={<BookOpen />} label="图鉴" active={currentScreen === 'error-book'} />
+            <NavButton
+              onClick={navigateExploreCockpit}
+              icon={<Navigation />}
+              label="御风"
+              active={currentScreen === 'explore-cockpit'}
+              statusDotClass={yufengStatusDotClass}
+              statusDotState={yufengTaskState?.status}
+            />
           </div>
         )}
       </div>
@@ -3060,10 +2730,32 @@ export default function App() {
   );
 }
 
-const NavButton = ({ icon, label, active = false, onClick }: { icon: React.ReactNode, label: string, active?: boolean, onClick?: () => void }) => (
-  <button onClick={onClick} className={`flex flex-col items-center gap-1 p-2 transition-colors ${active ? 'text-[var(--color-primary)]' : 'text-gray-400 hover:text-gray-600'}`}>
-    {React.isValidElement(icon) ? React.cloneElement(icon as React.ReactElement<any>, { size: active ? 24 : 22, strokeWidth: active ? 3 : 2 }) : icon}
-    <span className={`text-[10px] font-bold ${active ? 'opacity-100' : 'opacity-80'}`}>{label}</span>
+const NavButton = ({
+  icon,
+  label,
+  active = false,
+  onClick,
+  statusDotClass = '',
+  statusDotState,
+}: {
+  icon: React.ReactNode,
+  label: string,
+  active?: boolean,
+  onClick?: () => void,
+  statusDotClass?: string,
+  statusDotState?: string,
+}) => (
+  <button onClick={onClick} className={`wind-nav-btn relative flex flex-col items-center gap-1 transition-colors ${active ? 'wind-nav-btn-active text-[var(--color-primary)]' : 'text-gray-400 hover:text-gray-600'}`}>
+    {statusDotClass ? (
+      <span
+        aria-hidden="true"
+        data-testid="yufeng-status-dot"
+        data-yufeng-status-dot={statusDotState}
+        className={`absolute right-2 top-1 h-2 w-2 rounded-full ring-2 ring-white/80 ${statusDotClass}`}
+      />
+    ) : null}
+    {React.isValidElement(icon) ? React.cloneElement(icon as React.ReactElement<any>, { size: active ? 24 : 22, strokeWidth: active ? 3 : 2.2 }) : icon}
+    <span className={`text-[10px] font-black ${active ? 'opacity-100' : 'opacity-85'}`}>{label}</span>
   </button>
 );
 

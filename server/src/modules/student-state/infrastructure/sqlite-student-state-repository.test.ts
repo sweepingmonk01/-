@@ -70,3 +70,54 @@ test('SQLiteStudentStateRepository can create, list, and fetch latest snapshots'
   assert.equal(listed.length, 2);
   assert.equal(listed[0].id, created.id);
 });
+
+test('SQLiteStudentStateRepository preserves snapshot chronology for rapid writes', async () => {
+  const tempDir = mkdtempSync(path.join(tmpdir(), 'liezi-student-state-'));
+  const repository = new SQLiteStudentStateRepository({
+    dbFile: path.join(tempDir, 'mobius.sqlite'),
+  });
+
+  const first = await repository.create({
+    studentId: 'student-fast',
+    source: 'interaction-resolved',
+    interactionOutcome: 'failure',
+    cognitiveState: {
+      focus: 50,
+      frustration: 24,
+      joy: 46,
+      confidence: 42,
+      fatigue: 18,
+    },
+    profile: {
+      painPoint: '英语时态',
+      rule: '先找时间标志',
+      diagnosedMistakeCategories: [],
+    },
+  });
+
+  const second = await repository.create({
+    studentId: 'student-fast',
+    source: 'interaction-resolved',
+    interactionOutcome: 'success',
+    cognitiveState: {
+      focus: 58,
+      frustration: 16,
+      joy: 54,
+      confidence: 56,
+      fatigue: 16,
+    },
+    profile: {
+      painPoint: '英语时态',
+      rule: '先找时间标志',
+      diagnosedMistakeCategories: [],
+    },
+  });
+
+  assert.ok(first.createdAt < second.createdAt);
+
+  const listed = await repository.listByStudent('student-fast');
+  assert.deepEqual(
+    listed.map((snapshot) => snapshot.id),
+    [second.id, first.id],
+  );
+});

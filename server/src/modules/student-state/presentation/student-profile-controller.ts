@@ -1,16 +1,22 @@
 import type { Request, Response } from 'express';
 import type { SQLiteStudentProfileRepository } from '../infrastructure/sqlite-student-profile-repository.js';
 import { randomUUID } from 'node:crypto';
+import { GraphWeaverService } from '../../ai/application/graph-weaver-service.js';
+import { StudentStateSummaryService } from '../application/student-state-summary-service.js';
+import { resolveStudentScope } from '../../auth/presentation/request-auth.js';
+import { buildDashboardViewState } from '../../../../../shared/dashboard-metrics.js';
+import { createDefaultCognitiveState } from '../../../../../shared/cognitive-state.js';
 
 export class StudentProfileController {
-  constructor(private readonly repo: SQLiteStudentProfileRepository) {}
+  constructor(
+    private readonly repo: SQLiteStudentProfileRepository,
+    private readonly studentStateSummaryService: StudentStateSummaryService,
+    private readonly graphWeaverService: GraphWeaverService | null,
+  ) {}
 
   getProfile = async (req: Request, res: Response) => {
-    const studentId = req.params.studentId;
-    if (!studentId) {
-      res.status(400).json({ error: 'studentId is required.' });
-      return;
-    }
+    const studentId = resolveStudentScope(req, res, { source: 'params' });
+    if (!studentId) return;
     const profile = await this.repo.getProfile(studentId);
     if (!profile) {
       // Return empty default state instead of 404 to avoid frontend crash on new users
@@ -21,39 +27,33 @@ export class StudentProfileController {
   };
 
   updateProfile = async (req: Request, res: Response) => {
-    const studentId = req.params.studentId;
-    if (!studentId) {
-      res.status(400).json({ error: 'studentId is required.' });
-      return;
-    }
+    const studentId = resolveStudentScope(req, res, { source: 'params' });
+    if (!studentId) return;
     const profile = await this.repo.updateProfile(studentId, req.body);
     res.json(profile);
   };
 
   getActiveErrors = async (req: Request, res: Response) => {
-    const studentId = req.params.studentId;
-    if (!studentId) {
-      res.status(400).json({ error: 'studentId is required.' });
-      return;
-    }
+    const studentId = resolveStudentScope(req, res, { source: 'params' });
+    if (!studentId) return;
     const errors = await this.repo.getActiveErrors(studentId);
     res.json({ items: errors });
   };
 
   addErrorRecord = async (req: Request, res: Response) => {
-    const studentId = req.params.studentId;
-    if (!studentId) {
-      res.status(400).json({ error: 'studentId is required.' });
-      return;
-    }
+    const studentId = resolveStudentScope(req, res, { source: 'params' });
+    if (!studentId) return;
     const id = randomUUID();
     const errorRecord = await this.repo.addErrorRecord(studentId, id, req.body);
+    this.graphWeaverService?.enqueueForErrorRecord(studentId, errorRecord);
     res.json(errorRecord);
   };
 
   resolveError = async (req: Request, res: Response) => {
-    const { studentId, errorId } = req.params;
-    if (!studentId || !errorId) {
+    const studentId = resolveStudentScope(req, res, { source: 'params' });
+    const errorId = req.params.errorId;
+    if (!studentId) return;
+    if (!errorId) {
       res.status(400).json({ error: 'studentId and errorId are required.' });
       return;
     }
@@ -62,40 +62,30 @@ export class StudentProfileController {
   };
 
   getDashboardStats = async (req: Request, res: Response) => {
-    const studentId = req.params.studentId;
-    if (!studentId) {
-      res.status(400).json({ error: 'studentId is required.' });
-      return;
-    }
+    const studentId = resolveStudentScope(req, res, { source: 'params' });
+    if (!studentId) return;
 
     try {
       const profile = await this.repo.getProfile(studentId) || {
         targetScore: 115,
         timeSaved: 0,
-        cognitiveState: { focus: 50, frustration: 0, joy: 50 },
+        cognitiveState: createDefaultCognitiveState(),
       };
-
       const activeErrors = await this.repo.getActiveErrors(studentId);
-      
-      const painPointsRaw = activeErrors.map(e => e.painPoint).filter(Boolean);
-      const uniquePainPoints = Array.from(new Set(painPointsRaw));
-      
-      // Extremely simplified Mock "AI ROI Projection" for frontend demo.
-      // Every active error lowers our estimation by 3 points from the target, 
-      // but student won't fall beneath 60.
-      const estimatedScore = Math.max(60, profile.targetScore - (activeErrors.length * 3));
-
-      // Time saved calculation derived from the profile DB directly
-      const timeSavedHours = profile.timeSaved || 0;
-
-      res.json({
-        timeSavedHours,
+      const summary = await this.studentStateSummaryService.getStudentStateSummary(studentId);
+      const painPointsRaw = activeErrors.map((item) => item.painPoint).filter(Boolean);
+      const currentCognitiveState = summary?.currentCognitiveState ?? profile.cognitiveState;
+      const successCount = summary?.interactionStats.successCount ?? 0;
+      const failureCount = summary?.interactionStats.failureCount ?? 0;
+      res.json(buildDashboardViewState({
         targetScore: profile.targetScore,
-        estimatedScore,
-        cognitiveState: profile.cognitiveState,
+        timeSavedMinutes: profile.timeSaved ?? 0,
+        successCount,
+        failureCount,
         activeIssuesCount: activeErrors.length,
-        topPainPoints: uniquePainPoints.slice(0, 3)
-      });
+        painPoints: [...(summary?.recentPainPoints ?? []), ...painPointsRaw],
+        cognitiveState: currentCognitiveState,
+      }));
     } catch (error) {
       console.error('Error fetching dashboard stats:', error);
       res.status(500).json({ error: 'Failed to fetch dashboard stats' });

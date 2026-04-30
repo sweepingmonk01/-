@@ -1,18 +1,25 @@
 import type {
   CognitiveState,
+  CompatibleCognitiveState,
   LearningSignalInput,
   MediaJobRecord,
   SeedancePromptBundle,
   StoryBeatPlan,
+  StrategyDecision,
+  StrategySchedulerInput,
   StudentContext,
 } from './types.js';
 
 export interface CognitiveStateEngine {
-  resolve(input: LearningSignalInput | undefined, previous: Partial<CognitiveState> | undefined): CognitiveState;
+  resolve(input: LearningSignalInput | undefined, previous: CompatibleCognitiveState | undefined): CognitiveState;
 }
 
 export interface StoryPlanner {
-  plan(context: StudentContext, cognitiveState: CognitiveState): Promise<StoryBeatPlan>;
+  plan(context: StudentContext, cognitiveState: CognitiveState, strategyDecision: StrategyDecision): Promise<StoryBeatPlan>;
+}
+
+export interface StrategyScheduler {
+  decide(input: StrategySchedulerInput): StrategyDecision;
 }
 
 export interface VideoGenerationClient {

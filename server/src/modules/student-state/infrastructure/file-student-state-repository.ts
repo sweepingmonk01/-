@@ -2,7 +2,8 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { StudentStateRepository } from '../domain/ports.js';
-import type { StudentStateSnapshot } from '../domain/types.js';
+import type { StudentStateSnapshot, StudentStateSnapshotInput } from '../domain/types.js';
+import { normalizeCognitiveState } from '../../../../../shared/cognitive-state.js';
 
 interface FileStudentStateRepositoryOptions {
   dataFile: string;
@@ -15,12 +16,13 @@ export class FileStudentStateRepository implements StudentStateRepository {
     this.dataFile = options.dataFile;
   }
 
-  async create(snapshot: Omit<StudentStateSnapshot, 'id' | 'createdAt'>): Promise<StudentStateSnapshot> {
+  async create(snapshot: StudentStateSnapshotInput): Promise<StudentStateSnapshot> {
     const snapshots = await this.readAll();
     const record: StudentStateSnapshot = {
       id: randomUUID(),
       createdAt: new Date().toISOString(),
       ...snapshot,
+      cognitiveState: normalizeCognitiveState(snapshot.cognitiveState),
     };
     snapshots.push(record);
     await this.writeAll(snapshots);
@@ -57,7 +59,12 @@ export class FileStudentStateRepository implements StudentStateRepository {
     try {
       const raw = await readFile(this.dataFile, 'utf8');
       const parsed = JSON.parse(raw) as StudentStateSnapshot[];
-      return Array.isArray(parsed) ? parsed : [];
+      return Array.isArray(parsed)
+        ? parsed.map((snapshot) => ({
+          ...snapshot,
+          cognitiveState: normalizeCognitiveState(snapshot.cognitiveState),
+        }))
+        : [];
     } catch (error: unknown) {
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') {
         return [];

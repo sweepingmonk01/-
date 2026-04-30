@@ -1,0 +1,29 @@
+:root {
+  --vl-sky: #e6f2ff;
+  --vl-sky-deep: #6ec6ff;
+  --vl-cloud: #fffaf0;
+  --vl-parchment: #fff6e3;
+  --vl-parchment-deep: #f1d8aa;
+  --vl-ink: #122344;
+  --vl-ink-soft: #3a4a66;
+  --vl-line: #ffd36a;
+  --vl-crystal: #4fd6e6;
+
+  --vl-zh: #ff6b6b;
+  --vl-zh-deep: #a7343d;
+  --vl-ma: #38c7df;
+  --vl-ma-deep: #0e8197;
+  --vl-en: #ffc857;
+  --vl-en-deep: #b77a00;
+
+  --vl-success: #7edba8;
+  --vl-warning: #ffb84d;
+  --vl-danger: #ff6b6b;
+  --vl-locked: #cbd5e1;
+
+  --vl-radius-panel: 24px;
+  --vl-radius-card: 18px;
+  --vl-shadow-cloud: 0 18px 36px rgba(72, 112, 170, 0.14);
+  --vl-shadow-parchment: 0 16px 30px rgba(93, 64, 28, 0.1);
+  --vl-shadow-island: 0 18px 30px rgba(34, 63, 106, 0.18);
+}

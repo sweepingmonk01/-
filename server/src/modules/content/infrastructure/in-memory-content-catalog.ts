@@ -1,6 +1,10 @@
-import type { ExamQuestion, KnowledgePoint } from '../domain/types.js';
+import type { ExamQuestion, FoundationScienceCatalogQuery, KnowledgePoint } from '../domain/types.js';
+import {
+  SEEDED_FOUNDATION_KNOWLEDGE_EDGES,
+  SEEDED_FOUNDATION_KNOWLEDGE_NODES,
+} from './foundation-science-seeds.js';
 
-const KNOWLEDGE_POINTS: KnowledgePoint[] = [
+export const SEEDED_KNOWLEDGE_POINTS: KnowledgePoint[] = [
   {
     id: 'ma-g8-geom-midpoint',
     reference: { subject: 'ma', grade: '八年级', version: '人教版', term: '下' },
@@ -24,6 +28,17 @@ const KNOWLEDGE_POINTS: KnowledgePoint[] = [
     prerequisiteIds: [],
   },
   {
+    id: 'ma-g8-function-quadratic-vertex',
+    reference: { subject: 'ma', grade: '八年级', version: '人教版', term: '下' },
+    chapter: '函数',
+    section: '二次函数',
+    title: '二次函数顶点式与最值',
+    masteryGoal: '看到顶点式先锁定对称轴和顶点，再判断开口方向与最值。',
+    keywords: ['二次函数', '顶点式', '对称轴', '最值', '开口方向'],
+    commonMistakes: ['对称轴漏判', '最值方向混淆', '顶点坐标读错'],
+    prerequisiteIds: [],
+  },
+  {
     id: 'zh-g4-phonetic-polyphone',
     reference: { subject: 'zh', grade: '四年级', version: '部编版(人教)', term: '上' },
     chapter: '字词积累',
@@ -36,7 +51,7 @@ const KNOWLEDGE_POINTS: KnowledgePoint[] = [
   },
 ];
 
-const EXAM_QUESTIONS: ExamQuestion[] = [
+export const SEEDED_EXAM_QUESTIONS: ExamQuestion[] = [
   {
     id: 'ma-2025-sh-final-midpoint-range',
     subject: 'ma',
@@ -102,6 +117,22 @@ const EXAM_QUESTIONS: ExamQuestion[] = [
     tags: ['there is', 'there are', '最近主语'],
   },
   {
+    id: 'ma-2026-sh-unit-quadratic-vertex',
+    subject: 'ma',
+    grade: '八年级',
+    region: '上海',
+    source: 'unit-test',
+    year: 2026,
+    term: '下',
+    questionType: '函数应用题',
+    stem: '已知 y=a(x-h)^2+k，如何快速判断对称轴和最值？',
+    answerSummary: '对称轴为 x=h；再看 a 的正负决定最大值或最小值为 k。',
+    score: 5,
+    difficulty: 'standard',
+    knowledgePointIds: ['ma-g8-function-quadratic-vertex'],
+    tags: ['二次函数', '顶点式', '对称轴', '最值'],
+  },
+  {
     id: 'zh-2024-bj-final-polyphone',
     subject: 'zh',
     grade: '四年级',
@@ -121,10 +152,39 @@ const EXAM_QUESTIONS: ExamQuestion[] = [
 
 export class InMemoryContentCatalog {
   async listKnowledgePoints(): Promise<KnowledgePoint[]> {
-    return KNOWLEDGE_POINTS;
+    return SEEDED_KNOWLEDGE_POINTS;
   }
 
   async listExamQuestions(): Promise<ExamQuestion[]> {
-    return EXAM_QUESTIONS;
+    return SEEDED_EXAM_QUESTIONS;
+  }
+
+  async listFoundationKnowledgeNodes(query: FoundationScienceCatalogQuery = {}) {
+    return SEEDED_FOUNDATION_KNOWLEDGE_NODES.filter((node) => {
+      if (query.domain && node.domain !== query.domain) return false;
+      if (!query.keyword) return true;
+
+      const corpus = [
+        node.key,
+        node.label,
+        node.summary,
+        node.coreQuestion,
+        ...node.keywords,
+        ...node.relatedMistakePatterns,
+      ].join(' ').toLowerCase();
+      return corpus.includes(query.keyword.toLowerCase());
+    });
+  }
+
+  async listFoundationKnowledgeEdges(query: FoundationScienceCatalogQuery = {}) {
+    if (!query.domain && !query.keyword) return SEEDED_FOUNDATION_KNOWLEDGE_EDGES;
+
+    const nodes = await this.listFoundationKnowledgeNodes(query);
+    const nodeKeys = new Set(nodes.map((node) => node.key));
+    return SEEDED_FOUNDATION_KNOWLEDGE_EDGES.filter((edge) => nodeKeys.has(edge.source) || nodeKeys.has(edge.target));
+  }
+
+  async getFoundationKnowledgeNode(key: string) {
+    return SEEDED_FOUNDATION_KNOWLEDGE_NODES.find((node) => node.key === key) ?? null;
   }
 }

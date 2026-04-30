@@ -1,4 +1,4 @@
-import type { CognitiveStateEngine, MediaJobRepository, StoryPlanner, VideoGenerationClient } from '../domain/ports.js';
+import type { CognitiveStateEngine, MediaJobRepository, StoryPlanner, StrategyScheduler, VideoGenerationClient } from '../domain/ports.js';
 import type {
   CognitiveState,
   InteractionConfidence,
@@ -8,9 +8,13 @@ import type {
   MediaJobRecord,
   MobiusSessionPlan,
   SeedancePromptBundle,
+  StrategyDecision,
   StudentContext,
 } from '../domain/types.js';
+import { LearningCycleService } from '../../analytics/application/learning-cycle-service.js';
 import type { StudentStateRepository } from '../../student-state/domain/ports.js';
+import { StateUpdateEngine } from '../../student-state/application/state-update-engine.js';
+import { StateVectorService } from '../../student-state/application/state-vector-service.js';
 
 interface MobiusOrchestratorDeps {
   cognitiveEngine: CognitiveStateEngine;
@@ -18,14 +22,27 @@ interface MobiusOrchestratorDeps {
   videoClient: VideoGenerationClient;
   mediaJobs: MediaJobRepository;
   studentStates: StudentStateRepository;
+  stateVectors: StateVectorService;
+  updateEngine: StateUpdateEngine;
+  strategyScheduler: StrategyScheduler;
+  learningCycles: LearningCycleService;
 }
 
 export class MobiusOrchestrator {
   constructor(private readonly deps: MobiusOrchestratorDeps) {}
 
   async buildSession(context: StudentContext): Promise<MobiusSessionPlan> {
-    const cognitiveState = this.deps.cognitiveEngine.resolve(context.learningSignals, context.previousState);
-    const story = await this.deps.storyPlanner.plan(context, cognitiveState);
+    const priorVector = await this.deps.stateVectors.getCurrentVector(context.studentId);
+    const cognitiveState = this.deps.cognitiveEngine.resolve(
+      context.learningSignals,
+      context.previousState ?? priorVector?.cognitive,
+    );
+    const strategyDecision = this.deps.strategyScheduler.decide({
+      context,
+      cognitiveState,
+      stateVector: priorVector,
+    });
+    const story = await this.deps.storyPlanner.plan(context, cognitiveState, strategyDecision);
     const promptBundle = this.buildSeedancePrompt(context, story, cognitiveState);
     const mediaDraft = await this.deps.videoClient.createVideo(promptBundle, context);
     const mediaJob = await this.deps.mediaJobs.create({
@@ -56,8 +73,27 @@ export class MobiusOrchestrator {
       },
       learningSignals: context.learningSignals,
     });
+    const stateVector = await this.deps.stateVectors.getCurrentVector(context.studentId);
+    const cycle = await this.deps.learningCycles.startCycle({
+      studentId: context.studentId,
+      sessionId,
+      mediaJobId: mediaJob.id,
+      painPoint: context.painPoint,
+      rule: context.rule,
+      knowledgeActionId: context.knowledgeAction?.id,
+      stateBefore: cognitiveState,
+      stateVectorBefore: stateVector ?? undefined,
+      selectedAction: {
+        knowledgeAction: context.knowledgeAction,
+        interactionPrompt: story.interactionPrompt,
+        emotion: story.emotion,
+        selectedStrategy: story.strategyDecision.selectedStrategy,
+        strategyCandidates: story.strategyDecision.candidates,
+      },
+    });
 
     return {
+      cycleId: cycle.id,
       sessionId,
       studentId: context.studentId,
       createdAt: new Date().toISOString(),
@@ -77,6 +113,7 @@ export class MobiusOrchestrator {
           failureSignals: ['直接跳到结果，没有执行规则动作。'],
         },
       },
+      strategyDecision,
       story,
       video: {
         kind: 'video',
@@ -103,6 +140,130 @@ export class MobiusOrchestrator {
     return this.deps.mediaJobs.listByStudent(studentId);
   }
 
+  async createKnowledgeNodeVideo(input: {
+    studentId: string;
+    nodeKey: string;
+    nodeLabel: string;
+    domain?: 'physics' | 'neuroscience';
+    coreQuestion?: string;
+    curriculumNode?: string;
+    storyboardSeed?: string[];
+    relatedConcepts?: string[];
+    relatedErrors?: string[];
+    firstFrameUrl?: string;
+  }): Promise<MediaJobRecord> {
+    const isFoundationNode = input.nodeKey.startsWith('physics.') || input.nodeKey.startsWith('neuroscience.');
+    const promptBundle: SeedancePromptBundle = {
+      title: `${isFoundationNode ? 'Foundation science' : 'Knowledge node'} manga intervention for ${input.nodeLabel}`,
+      visualStyle: 'clean educational manga storyboard, GPT-image-2 concept-card continuity, concept graph motion, no real people',
+      durationSeconds: 6,
+      aspectRatio: '9:16',
+      referenceImages: input.firstFrameUrl ? [input.firstFrameUrl] : undefined,
+      audioMode: 'ambient',
+      resolution: '720p',
+      prompt: [
+        isFoundationNode
+          ? 'Create a 6-second educational manga-drama video for a foundation science exploration module.'
+          : 'Create a 6-second educational manga storyboard video for a mobile learning scene.',
+        input.firstFrameUrl
+          ? 'Use the provided GPT-image-2 concept-card image as the first frame and preserve its palette, central node, and graph layout.'
+          : 'Start with a clean GPT-image-2 style concept-card frame.',
+        input.domain ? `Foundation domain: ${input.domain}.` : undefined,
+        `Core concept node: ${input.nodeLabel}.`,
+        input.coreQuestion ? `Core question: ${input.coreQuestion}.` : undefined,
+        input.curriculumNode ? `Connect this foundation node to the student's current curriculum node: ${input.curriculumNode}.` : undefined,
+        input.relatedConcepts?.length ? `Connected concepts: ${input.relatedConcepts.slice(0, 6).join(', ')}.` : undefined,
+        input.relatedErrors?.length ? `Mistake cues to fade out: ${input.relatedErrors.slice(0, 4).join(', ')}.` : undefined,
+        input.storyboardSeed?.length
+          ? `Storyboard seed: ${input.storyboardSeed.slice(0, 4).join(' ')}`
+          : 'Storyboard beats: panel 1 shows the concept node waking up; panel 2 shows mistake cues breaking apart; panel 3 shows the correct rule path lighting up.',
+        'Keep every visual action tied to the concept node, connected concepts, and mistake cues. Avoid generic scenery.',
+        'No real person likeness, no copyrighted characters, no school logos.',
+        'Camera: gentle manga panel push-in with light motion lines. Audio: subtle UI chime, no speech.',
+      ].filter(Boolean).join(' '),
+      fallbackStoryboard: input.storyboardSeed?.length ? input.storyboardSeed : [
+        `第一格：GPT-image-2 风格概念卡中，「${input.nodeLabel}」节点亮起。`,
+        '第二格：相邻错因像漫画碎片一样淡出，相关概念线重新排列。',
+        '第三格：正确规则路径被强调，画面停在可回到学习任务的清晰节点卡上。',
+      ],
+    };
+    const mediaDraft = await this.deps.videoClient.createVideo(promptBundle, {
+      studentId: input.studentId,
+      painPoint: input.nodeLabel,
+      rule: input.relatedConcepts?.[0] ?? '围绕当前知识节点完成规则路径强化。',
+    });
+
+    return this.deps.mediaJobs.create({
+      studentId: input.studentId,
+      provider: mediaDraft.provider,
+      providerJobId: mediaDraft.providerJobId,
+      status: mediaDraft.status,
+      promptBundle,
+      playbackUrl: mediaDraft.playbackUrl,
+    });
+  }
+
+  async recordFoundationExploration(input: {
+    studentId: string;
+    nodeKey: string;
+    nodeLabel: string;
+    domain: 'physics' | 'neuroscience';
+    coreQuestion: string;
+    taskId: string;
+    taskLabel: string;
+    actionType: 'select' | 'draw' | 'drag' | 'speak' | 'sequence';
+    outcome: InteractionOutcome;
+    note?: string;
+  }) {
+    const vectorBefore = await this.deps.stateVectors.getCurrentVector(input.studentId);
+    const latestSnapshot = await this.deps.studentStates.getLatestByStudent(input.studentId);
+    const stateBefore = vectorBefore?.cognitive ?? latestSnapshot?.cognitiveState ?? this.deps.updateEngine.defaultCognitiveState();
+    const stateAfter = this.deps.updateEngine.transitionFoundationExplorationState(stateBefore, input.outcome);
+
+    await this.deps.studentStates.create({
+      studentId: input.studentId,
+      source: 'foundation-exploration',
+      interactionOutcome: input.outcome,
+      cognitiveState: stateAfter,
+      profile: {
+        grade: latestSnapshot?.profile.grade,
+        targetScore: latestSnapshot?.profile.targetScore,
+        painPoint: `基础科学探索：${input.nodeLabel}`,
+        rule: input.coreQuestion,
+        knowledgeActionId: `foundation:${input.nodeKey}:${input.taskId}`,
+        knowledgeActionType: input.actionType,
+        diagnosedMistakeCategories: [],
+      },
+      learningSignals: {
+        attempts: 1,
+        correctStreak: input.outcome === 'success' ? 1 : 0,
+        wrongStreak: input.outcome === 'failure' ? 1 : 0,
+      },
+    });
+    const vectorAfter = await this.deps.stateVectors.getCurrentVector(input.studentId);
+    const cycle = await this.deps.learningCycles.recordFoundationExploration({
+      ...input,
+      stateBefore,
+      stateAfter,
+      stateVectorBefore: vectorBefore,
+      stateVectorAfter: vectorAfter,
+    });
+
+    return {
+      cycleId: cycle.id,
+      studentId: input.studentId,
+      nodeKey: input.nodeKey,
+      outcome: input.outcome,
+      cognitiveState: stateAfter,
+      stateVectorVersion: vectorAfter?.version,
+      nextActions: [
+        '基础科学探索行为已写入 learning cycle。',
+        '状态向量已吸收本次探索结果。',
+        '后续错题修复和策略调度可读取该节点证据。',
+      ],
+    };
+  }
+
   async refreshMediaJob(jobId: string) {
     const job = await this.deps.mediaJobs.getById(jobId);
     if (!job) return null;
@@ -123,10 +284,22 @@ export class MobiusOrchestrator {
     const now = new Date().toISOString();
     const interactions = [...(job.interactions ?? []), { outcome: input.outcome, actionType: input.actionType, createdAt: now }];
     await this.deps.mediaJobs.update(jobId, { interactions });
-    await this.recordInteractionSnapshot(job, input.outcome);
+    const { stateBefore, stateAfter, vectorBefore, vectorAfter } = await this.recordInteractionSnapshot(job, input.outcome);
+    const strategyDecision = await this.resolveFollowupStrategyDecision(job, stateAfter, vectorAfter);
     const branchJob = await this.ensureBranchVideoJob(job, input.outcome);
+    const cycle = await this.deps.learningCycles.recordInteractionResolution({
+      mediaJobId: job.id,
+      outcome: input.outcome,
+      stateBefore,
+      stateAfter,
+      stateVectorBefore: vectorBefore ?? undefined,
+      stateVectorAfter: vectorAfter ?? undefined,
+      actionType: input.actionType,
+      followupStrategyDecision: strategyDecision,
+      branchJobId: branchJob.id,
+    });
 
-    return this.buildInteractionResolution(job, input.outcome, branchJob);
+    return this.buildInteractionResolution(job, input.outcome, strategyDecision, branchJob, undefined, cycle?.id);
   }
 
   async adjudicateInteraction(jobId: string, input: { submission: InteractionSubmission; actionType?: string }) {
@@ -145,10 +318,24 @@ export class MobiusOrchestrator {
       },
     ];
     await this.deps.mediaJobs.update(jobId, { interactions });
-    await this.recordInteractionSnapshot(job, adjudication.outcome);
+    const { stateBefore, stateAfter, vectorBefore, vectorAfter } = await this.recordInteractionSnapshot(job, adjudication.outcome);
+    const strategyDecision = await this.resolveFollowupStrategyDecision(job, stateAfter, vectorAfter);
     const branchJob = await this.ensureBranchVideoJob(job, adjudication.outcome);
+    const cycle = await this.deps.learningCycles.recordInteractionResolution({
+      mediaJobId: job.id,
+      outcome: adjudication.outcome,
+      stateBefore,
+      stateAfter,
+      stateVectorBefore: vectorBefore ?? undefined,
+      stateVectorAfter: vectorAfter ?? undefined,
+      actionType: input.actionType ?? input.submission.actionType,
+      submission: input.submission,
+      followupStrategyDecision: strategyDecision,
+      adjudication,
+      branchJobId: branchJob.id,
+    });
 
-    return this.buildInteractionResolution(job, adjudication.outcome, branchJob, adjudication.rationale);
+    return this.buildInteractionResolution(job, adjudication.outcome, strategyDecision, branchJob, adjudication.rationale, cycle?.id);
   }
 
   private buildSeedancePrompt(
@@ -158,22 +345,30 @@ export class MobiusOrchestrator {
   ): SeedancePromptBundle {
     return {
       title: `Mobius scene for ${context.painPoint}`,
-      visualStyle: story.visualStyle,
+      visualStyle: `${story.visualStyle}; educational manga storyboard; crisp panel transitions; no real people`,
       durationSeconds: 10,
       aspectRatio: '9:16',
       prompt: [
-        'Create an educational anime motion short.',
+        'Create a knowledge-point educational manga drama video for a mobile learning app.',
+        'Use clear comic-panel composition, panel-to-panel motion, readable symbolic props, and a first-frame style compatible with GPT-image-2 concept cards.',
         `Pain point: ${context.painPoint}.`,
         `Core rule: ${context.rule}.`,
+        context.questionText ? `Question context: ${context.questionText}.` : undefined,
+        context.knowledgeAction ? `Required knowledge action: ${context.knowledgeAction.label} (${context.knowledgeAction.actionType}) - ${context.knowledgeAction.instruction}.` : undefined,
+        context.diagnosedMistakes?.length
+          ? `Diagnosed mistake cues: ${context.diagnosedMistakes.slice(0, 4).map((mistake) => mistake.label).join(', ')}.`
+          : undefined,
         `Emotion target: ${story.emotion}.`,
-        `Student cognitive state: focus=${cognitiveState.focus}, frustration=${cognitiveState.frustration}, joy=${cognitiveState.joy}, confidence=${cognitiveState.confidence}, fatigue=${cognitiveState.fatigue}.`,
+        `Student AI Active kernel: time=${cognitiveState.kernel.time}, signal-noise-ratio=${cognitiveState.kernel.signalNoiseRatio}, emotion=${cognitiveState.kernel.emotion}, confidence=${cognitiveState.execution.confidence}, fatigue=${cognitiveState.execution.fatigue}.`,
         `Scene intro: ${story.sceneIntro}.`,
         `Interaction setup: ${story.interactionPrompt}.`,
         `Success payoff: ${story.successScene}.`,
         `Failure branch: ${story.failureScene}.`,
-      ].join(' '),
+        'Every shot must teach or test the core rule. Avoid decorative filler, celebrity likeness, copyrighted characters, school logos, and private student information.',
+      ].filter(Boolean).join(' '),
       fallbackStoryboard: [
-        story.sceneIntro,
+        `第一格：围绕「${context.painPoint}」建立漫画冲突，并让知识点符号进入画面。`,
+        `第二格：用分镜动作呈现核心规则「${context.rule}」。`,
         story.interactionPrompt,
         story.successScene,
         story.failureScene,
@@ -184,8 +379,10 @@ export class MobiusOrchestrator {
   private buildInteractionResolution(
     job: NonNullable<Awaited<ReturnType<MobiusOrchestrator['getMediaJob']>>>,
     outcome: InteractionOutcome,
+    strategyDecision: StrategyDecision,
     branchJob?: MediaJobRecord,
     rationale?: string[],
+    cycleId?: string,
   ): InteractionResolution {
     const story = job.story;
     const video = branchJob ? {
@@ -200,11 +397,14 @@ export class MobiusOrchestrator {
 
     if (outcome === 'success') {
       return {
+        cycleId,
         outcome,
         title: 'MISSION ACCOMPLISHED',
         narration: story?.successScene ?? '规则被正确触发，场景稳定，精灵成功穿越故障世界线。',
         coachMessage: '系统确认你刚才的操作命中了核心规则，可以进入下一段强化或收尾动画。',
+        strategyDecision,
         nextActions: [
+          this.buildFollowupActionLine(strategyDecision),
           '记录这次成功操作并提高该知识动作的信心权重。',
           branchJob ? '已分配 success 分支视频任务，前端继续轮询直至分支素材 ready。' : '本次未生成额外 success 分支视频，沿用文本结算。',
           '允许前端进入奖励或复盘界面。',
@@ -215,11 +415,14 @@ export class MobiusOrchestrator {
     }
 
     return {
+      cycleId,
       outcome,
       title: 'SYSTEM COLLAPSE',
       narration: story?.failureScene ?? '错误操作导致世界线短暂坍塌，精灵进入保护模式。',
       coachMessage: '系统判定这次操作没有命中目标规则，建议收窄提示并给出下一步引导。',
+      strategyDecision,
       nextActions: [
+        this.buildFollowupActionLine(strategyDecision),
         '记录失败交互并提高该知识点的保护性引导等级。',
         branchJob ? '已分配 failure 分支视频任务，前端继续轮询直至分支素材 ready。' : '本次未生成额外 failure 分支视频，沿用文本结算。',
         '允许前端展示更窄一步的提示或重试入口。',
@@ -283,16 +486,56 @@ export class MobiusOrchestrator {
     return 0;
   }
 
+  private async resolveFollowupStrategyDecision(
+    job: MediaJobRecord,
+    cognitiveState: CognitiveState,
+    stateVector: Awaited<ReturnType<StateVectorService['getCurrentVector']>>,
+  ): Promise<StrategyDecision> {
+    const cycle = await this.deps.learningCycles.getCycleByMediaJobId(job.id);
+
+    return this.deps.strategyScheduler.decide({
+      context: this.buildStrategyContext(job, cycle),
+      cognitiveState,
+      stateVector: stateVector ?? undefined,
+    });
+  }
+
+  private buildStrategyContext(
+    job: MediaJobRecord,
+    cycle: Awaited<ReturnType<LearningCycleService['getCycleByMediaJobId']>>,
+  ): StudentContext {
+    return {
+      studentId: job.studentId,
+      painPoint: cycle?.painPoint ?? job.promptBundle.title.replace(/^Mobius scene for /, ''),
+      rule: cycle?.rule ?? this.extractRuleFromPrompt(job.promptBundle.prompt),
+      knowledgeAction: cycle?.selectedAction?.knowledgeAction ?? job.story?.knowledgeAction,
+    };
+  }
+
+  private buildFollowupActionLine(strategyDecision: StrategyDecision) {
+    const selected = strategyDecision.candidates.find((candidate) => candidate.strategy === strategyDecision.selectedStrategy);
+
+    return `同一调度器已重算后续动作，当前优先 ${this.describeStrategy(strategyDecision.selectedStrategy)}：${selected?.rationale ?? '进入下一轮收口。'}`;
+  }
+
+  private describeStrategy(strategy: StrategyDecision['selectedStrategy']) {
+    if (strategy === 'teach') return 'teach / 保护性教学';
+    if (strategy === 'review') return 'review / 规则回看';
+    return 'probe / 断点探测';
+  }
+
   private async recordInteractionSnapshot(job: MediaJobRecord, outcome: InteractionOutcome) {
+    const vectorBefore = await this.deps.stateVectors.getCurrentVector(job.studentId);
     const latestSnapshot = await this.deps.studentStates.getLatestByStudent(job.studentId);
-    const baseline = latestSnapshot?.cognitiveState ?? this.defaultCognitiveState();
+    const stateBefore = vectorBefore?.cognitive ?? latestSnapshot?.cognitiveState ?? this.deps.updateEngine.defaultCognitiveState();
+    const stateAfter = this.deps.updateEngine.transitionInteractionState(stateBefore, outcome);
 
     await this.deps.studentStates.create({
       studentId: job.studentId,
       source: 'interaction-resolved',
       mediaJobId: job.id,
       interactionOutcome: outcome,
-      cognitiveState: this.transitionCognitiveState(baseline, outcome),
+      cognitiveState: stateAfter,
       profile: {
         grade: latestSnapshot?.profile.grade,
         targetScore: latestSnapshot?.profile.targetScore,
@@ -304,38 +547,18 @@ export class MobiusOrchestrator {
       },
       learningSignals: latestSnapshot?.learningSignals,
     });
+    const vectorAfter = await this.deps.stateVectors.getCurrentVector(job.studentId);
+
+    return {
+      stateBefore,
+      stateAfter,
+      vectorBefore,
+      vectorAfter,
+    };
   }
 
   private extractRuleFromPrompt(prompt: string): string {
     return prompt.split('Core rule: ')[1]?.split('. Emotion target:')[0]?.trim() ?? '继续围绕当前核心规则强化。';
-  }
-
-  private transitionCognitiveState(previous: CognitiveState, outcome: InteractionOutcome): CognitiveState {
-    const delta = outcome === 'success'
-      ? { focus: 6, frustration: -10, joy: 8, confidence: 12, fatigue: -2 }
-      : { focus: -5, frustration: 12, joy: -6, confidence: -10, fatigue: 5 };
-
-    return {
-      focus: this.clampCognitiveValue(previous.focus + delta.focus),
-      frustration: this.clampCognitiveValue(previous.frustration + delta.frustration),
-      joy: this.clampCognitiveValue(previous.joy + delta.joy),
-      confidence: this.clampCognitiveValue(previous.confidence + delta.confidence),
-      fatigue: this.clampCognitiveValue(previous.fatigue + delta.fatigue),
-    };
-  }
-
-  private clampCognitiveValue(value: number) {
-    return Math.max(0, Math.min(100, Math.round(value)));
-  }
-
-  private defaultCognitiveState(): CognitiveState {
-    return {
-      focus: 55,
-      frustration: 18,
-      joy: 52,
-      confidence: 50,
-      fatigue: 20,
-    };
   }
 
   private async ensureBranchVideoJob(job: MediaJobRecord, outcome: InteractionOutcome): Promise<MediaJobRecord> {
