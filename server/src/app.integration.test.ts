@@ -488,6 +488,10 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
           id: string;
           cycleId?: string;
           status: string;
+          hypothesisSummary?: {
+            selectedHypothesis?: { id?: string };
+            selectedIntervention?: { type?: string };
+          };
           messages: Array<{ role: string; content: string }>;
         };
       };
@@ -498,6 +502,8 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
       assert.ok(failurePayload.diagnosticThread?.id);
       assert.equal(failurePayload.diagnosticThread?.cycleId, session.cycleId);
       assert.equal(failurePayload.diagnosticThread?.status, 'active');
+      assert.ok(failurePayload.diagnosticThread?.hypothesisSummary?.selectedHypothesis?.id);
+      assert.equal(failurePayload.diagnosticThread?.hypothesisSummary?.selectedIntervention?.type, 'probe');
       assert.equal(failurePayload.diagnosticThread?.messages.length, 1);
 
       const cycle = await learningCycles.getByMediaJobId(session.video.jobId);
@@ -609,6 +615,33 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
         },
       );
       assert.equal(forbiddenThreadRead.status, 403);
+
+      const replyThreadResponse = await fetch(
+        `${baseUrl}/api/mobius/ai/socratic-diagnostic/threads/${failurePayload.diagnosticThread?.id}/messages`,
+        {
+          method: 'POST',
+          headers: {
+            ...(await createAuthHeader('student-a')),
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            content: '我刚才没看到中点这个题眼，重来一次我会先看中点，再想中线。',
+          }),
+        },
+      );
+      assert.equal(replyThreadResponse.status, 200);
+      const repliedThread = await replyThreadResponse.json() as {
+        status: string;
+        hypothesisSummary?: {
+          lastUpdate?: { updates?: Array<{ hypothesisId?: string }> };
+          selectedHypothesis?: { id?: string };
+          selectedIntervention?: { type?: string };
+        };
+      };
+      assert.equal(repliedThread.status, 'active');
+      assert.ok(repliedThread.hypothesisSummary?.selectedHypothesis?.id);
+      assert.equal(repliedThread.hypothesisSummary?.selectedIntervention?.type, 'review');
+      assert.ok((repliedThread.hypothesisSummary?.lastUpdate?.updates?.length ?? 0) >= 1);
     });
   } finally {
     await new Promise<void>((resolve, reject) => {

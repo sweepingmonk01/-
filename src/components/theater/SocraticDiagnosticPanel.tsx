@@ -38,6 +38,21 @@ export default function SocraticDiagnosticPanel({
         </div>
       </div>
 
+      {thread.hypothesisSummary?.selectedHypothesis && (
+        <div className="mt-3 rounded-2xl border border-[var(--color-primary)]/12 bg-white/75 px-3 py-3">
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[10px] font-black uppercase tracking-[0.14em] text-[#1a1a2e]/50">当前猜想</p>
+            <p className="text-[10px] font-black text-[var(--color-primary)]">
+              {Math.round(thread.hypothesisSummary.selectedHypothesis.confidence * 100)}%
+            </p>
+          </div>
+          <p className="mt-1 text-sm font-bold text-[#1a1a2e]">{thread.hypothesisSummary.selectedHypothesis.label}</p>
+          <p className="mt-1 text-xs leading-5 text-[#1a1a2e]/70">
+            {thread.hypothesisSummary.selectedIntervention?.prompt ?? thread.hypothesisSummary.selectedProbeAction?.prompt}
+          </p>
+        </div>
+      )}
+
       <div className="mt-3 space-y-2">
         {thread.messages.slice(-4).map((message, index) => (
           <div

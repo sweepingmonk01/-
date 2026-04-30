@@ -39,6 +39,11 @@ test('SQLiteSocraticThreadRepository backfills new optional columns on existing 
     painPoint: '几何辅助线',
     rule: '见中点先想中线',
     rationale: ['第一步没有触发规则'],
+    hypothesisSummary: {
+      source: 'heuristic-v1',
+      generatedAt: now,
+      candidates: [],
+    },
     messages: [
       {
         role: 'assistant',
@@ -57,4 +62,5 @@ test('SQLiteSocraticThreadRepository backfills new optional columns on existing 
   assert.equal(saved?.painPoint, '几何辅助线');
   assert.equal(saved?.rule, '见中点先想中线');
   assert.deepEqual(saved?.rationale, ['第一步没有触发规则']);
+  assert.equal(saved?.hypothesisSummary?.source, 'heuristic-v1');
 });
