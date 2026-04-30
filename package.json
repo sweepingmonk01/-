@@ -12,7 +12,10 @@
     "lint": "tsc --noEmit",
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
     "test:server": "node --import tsx --test server/**/*.test.ts",
-    "migrate:sqlite": "tsx server/scripts/migrate-file-storage-to-sqlite.ts"
+    "migrate:sqlite": "tsx server/scripts/migrate-file-storage-to-sqlite.ts",
+    "check:worktree": "node scripts/check-worktree-boundary.mjs",
+    "check:worktree:strict": "node scripts/check-worktree-boundary.mjs --strict",
+    "check:worktree:verbose": "node scripts/check-worktree-boundary.mjs --verbose"
   },
   "dependencies": {
     "@google/genai": "^1.29.0",
