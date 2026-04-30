@@ -1,4 +1,11 @@
-import type { HypothesisCandidate, HypothesisSummary, ProbeAction, SocraticMessage } from '../domain/types.js';
+import type {
+  HypothesisCandidate,
+  HypothesisConfidenceUpdate,
+  HypothesisIntervention,
+  HypothesisSummary,
+  ProbeAction,
+  SocraticMessage,
+} from '../domain/types.js';
 import type { StudentStateVector } from '../../student-state/domain/types.js';
 
 interface BuildHypothesisInput {
@@ -9,20 +16,95 @@ interface BuildHypothesisInput {
   messages?: SocraticMessage[];
 }
 
+interface UpdateHypothesisInput {
+  summary: HypothesisSummary;
+  studentReply: string;
+  painPoint: string;
+  rule?: string;
+}
+
 const clampConfidence = (value: number) => Math.max(0.05, Math.min(0.95, Number(value.toFixed(2))));
+const clampDelta = (value: number) => Math.max(-0.25, Math.min(0.25, Number(value.toFixed(2))));
+const normalizeText = (value: string) => value.trim().toLowerCase();
+const includesAny = (value: string, patterns: string[]) => patterns.some((pattern) => value.includes(pattern));
+const normalizeCandidates = (candidates: HypothesisCandidate[]) =>
+  candidates
+    .map((candidate) => ({
+      ...candidate,
+      confidence: clampConfidence(candidate.confidence),
+      evidence: candidate.evidence.filter(Boolean).slice(0, 3),
+    }))
+    .sort((left, right) => right.confidence - left.confidence)
+    .slice(0, 3);
 
 export class HypothesisEngine {
   buildSummary(input: BuildHypothesisInput): HypothesisSummary {
     const generatedAt = new Date().toISOString();
-    const candidates = this.rankCandidates(input);
-    const selectedHypothesis = candidates[0];
-
-    return {
+    return this.finalizeSummary({
       source: 'heuristic-v1',
       generatedAt,
+      candidates: this.rankCandidates(input),
+    });
+  }
+
+  updateSummary(input: UpdateHypothesisInput): HypothesisSummary {
+    const reply = normalizeText(input.studentReply);
+    const candidates = normalizeCandidates(
+      input.summary.candidates.map((candidate) => {
+        const update = this.resolveCandidateUpdate(candidate, reply, input.rule);
+        return {
+          ...candidate,
+          confidence: clampConfidence(candidate.confidence + update.delta),
+          evidence: update.reasons.length > 0
+            ? [...candidate.evidence, ...update.reasons].slice(0, 3)
+            : candidate.evidence,
+        };
+      }),
+    );
+    const selectedHypothesis = candidates[0];
+    const selectedProbeAction = selectedHypothesis?.probeActions[0];
+    const selectedIntervention = this.buildIntervention(
+      selectedHypothesis,
+      selectedProbeAction,
+      reply,
+      input.rule,
+    );
+    const updates = input.summary.candidates
+      .map((candidate): HypothesisConfidenceUpdate | null => {
+        const nextCandidate = candidates.find((item) => item.id === candidate.id);
+        if (!nextCandidate) return null;
+
+        const resolved = this.resolveCandidateUpdate(candidate, reply, input.rule);
+        if (resolved.reasons.length === 0 && resolved.delta === 0) {
+          return null;
+        }
+
+        return {
+          hypothesisId: candidate.id,
+          label: candidate.label,
+          previousConfidence: candidate.confidence,
+          nextConfidence: nextCandidate.confidence,
+          delta: clampDelta(nextCandidate.confidence - candidate.confidence),
+          reasons: resolved.reasons,
+        };
+      })
+      .filter((item): item is HypothesisConfidenceUpdate => Boolean(item));
+
+    return {
+      source: input.summary.source,
+      generatedAt: input.summary.generatedAt,
       candidates,
       selectedHypothesis,
-      selectedProbeAction: selectedHypothesis?.probeActions[0],
+      selectedProbeAction,
+      selectedIntervention,
+      lastUpdate: {
+        source: 'heuristic-v1',
+        updatedAt: new Date().toISOString(),
+        updates,
+        selectedHypothesis,
+        selectedProbeAction,
+        selectedIntervention,
+      },
     };
   }
 
@@ -135,19 +217,136 @@ export class HypothesisEngine {
           },
         ],
       }),
+      this.buildCandidate({
+        id: 'knowledge-fragile',
+        kind: 'knowledge-fragile',
+        label: '规则表征脆弱',
+        summary: '学生对规则有模糊印象，但还不能稳定提取成可执行的第一步。',
+        confidence: 0.22
+          + (includesAny(rationaleText, ['忘', '记不住', '不会']) ? 0.12 : 0)
+          + (includesAny(combinedUserText, ['想不起来', '不知道', '不会']) ? 0.18 : 0)
+          + Math.min(0.06, recentFailureCount * 0.015),
+        evidence: [
+          ...(includesAny(combinedUserText, ['想不起来', '不知道', '不会']) ? ['学生直接暴露规则提取困难'] : []),
+          ...(input.rule ? [`目标规则：${input.rule}`] : []),
+        ],
+        probeActions: [
+          {
+            id: 'probe-rule-fragility',
+            type: 'ask-rule-recall',
+            prompt: `先别算题，只说“${input.rule ?? '当前规则'}”通常在什么题眼下触发。`,
+            successSignal: '学生能把规则和触发题眼成对说出。',
+          },
+        ],
+      }),
     ];
 
-    return candidates
-      .map((candidate) => ({
-        ...candidate,
-        confidence: clampConfidence(candidate.confidence),
-        evidence: candidate.evidence.filter(Boolean).slice(0, 3),
-      }))
-      .sort((left, right) => right.confidence - left.confidence)
-      .slice(0, 3);
+    return normalizeCandidates(candidates);
   }
 
   private buildCandidate(candidate: HypothesisCandidate): HypothesisCandidate {
     return candidate;
+  }
+
+  private finalizeSummary(summary: Pick<HypothesisSummary, 'source' | 'generatedAt' | 'candidates'>): HypothesisSummary {
+    const selectedHypothesis = summary.candidates[0];
+    const selectedProbeAction = selectedHypothesis?.probeActions[0];
+
+    return {
+      ...summary,
+      selectedHypothesis,
+      selectedProbeAction,
+      selectedIntervention: this.buildIntervention(selectedHypothesis, selectedProbeAction),
+    };
+  }
+
+  private resolveCandidateUpdate(candidate: HypothesisCandidate, reply: string, rule?: string) {
+    const ruleSignal = Boolean(rule && normalizeText(rule).length > 1 && reply.includes(normalizeText(rule)));
+    const hasFirstStepSignal = includesAny(reply, ['第一步', '先', '重来', '下次', '应该']);
+    const hasCueSignal = includesAny(reply, ['没看到', '看漏', '题眼', '条件', '图形']);
+    const hasGuessSignal = includesAny(reply, ['猜', '蒙', '试一下']);
+    const hasKnowledgeSignal = includesAny(reply, ['忘', '记不住', '不会', '不知道', '想不起来']);
+    const hasDirectActionSignal = includesAny(reply, ['直接', '没先', '没有先']);
+
+    if (candidate.kind === 'rule-not-triggered') {
+      const reasons = [
+        ...(hasDirectActionSignal ? ['学生承认自己直接推进，没有先触发规则。'] : []),
+        ...(ruleSignal ? ['学生回复中直接提到了应先触发的规则。'] : []),
+      ];
+      const delta = (hasDirectActionSignal ? 0.12 : 0) + (ruleSignal && hasFirstStepSignal ? 0.08 : 0) - (hasCueSignal ? 0.04 : 0);
+      return { delta: clampDelta(delta), reasons };
+    }
+
+    if (candidate.kind === 'cue-missed') {
+      const reasons = [
+        ...(hasCueSignal ? ['学生把断点定位在题眼/条件识别上。'] : []),
+      ];
+      const delta = (hasCueSignal ? 0.18 : 0) - (ruleSignal ? 0.03 : 0);
+      return { delta: clampDelta(delta), reasons };
+    }
+
+    if (candidate.kind === 'strategy-confusion') {
+      const reasons = [
+        ...(hasFirstStepSignal ? ['学生开始描述第一步与后续顺序，暴露策略层断点。'] : []),
+      ];
+      const delta = hasFirstStepSignal ? 0.11 : 0;
+      return { delta: clampDelta(delta), reasons };
+    }
+
+    if (candidate.kind === 'guessing-with-low-monitoring') {
+      const reasons = [
+        ...(hasGuessSignal ? ['学生明确提到猜测式推进。'] : []),
+        ...(hasFirstStepSignal && ruleSignal ? ['学生已能复述第一步，猜测风险开始下降。'] : []),
+      ];
+      const delta = (hasGuessSignal ? 0.18 : 0) - (hasFirstStepSignal && ruleSignal ? 0.1 : 0);
+      return { delta: clampDelta(delta), reasons };
+    }
+
+    const reasons = [
+      ...(hasKnowledgeSignal ? ['学生直接暴露出规则提取或记忆脆弱。'] : []),
+    ];
+    const delta = hasKnowledgeSignal ? 0.17 : 0;
+    return { delta: clampDelta(delta), reasons };
+  }
+
+  private buildIntervention(
+    selectedHypothesis?: HypothesisCandidate,
+    selectedProbeAction?: ProbeAction,
+    replyText?: string,
+    rule?: string,
+  ): HypothesisIntervention | undefined {
+    if (!selectedHypothesis) return undefined;
+
+    const normalizedReply = replyText ? normalizeText(replyText) : '';
+    const hasRestatedFirstStep = includesAny(normalizedReply, ['我会先', '应该先', '先找', '先看', '先想', '先触发'])
+      || Boolean(rule && normalizedReply.includes(normalizeText(rule)));
+
+    if (hasRestatedFirstStep && selectedHypothesis.confidence >= 0.5) {
+      return {
+        id: `intervention:${selectedHypothesis.id}:review`,
+        hypothesisId: selectedHypothesis.id,
+        type: 'review',
+        prompt: `现在把“${rule ?? selectedHypothesis.label}”压缩成一句自检口令，再补上触发它的题眼。`,
+        rationale: `“${selectedHypothesis.label}”已经有足够证据，先把正确第一步固化成可复用口令。`,
+      };
+    }
+
+    if (selectedHypothesis.confidence < 0.68) {
+      return {
+        id: `intervention:${selectedHypothesis.id}:probe`,
+        hypothesisId: selectedHypothesis.id,
+        type: 'probe',
+        prompt: selectedProbeAction?.prompt ?? '把你当时的第一步动作说清楚。',
+        rationale: `当前最高风险猜想仍是“${selectedHypothesis.label}”，需要先继续缩小断点。`,
+      };
+    }
+
+    return {
+      id: `intervention:${selectedHypothesis.id}:teach`,
+      hypothesisId: selectedHypothesis.id,
+      type: 'teach',
+      prompt: `先别整题推进。只用一句话说清“${rule ?? selectedHypothesis.label}”的正确第一步，再说它由什么题眼触发。`,
+      rationale: `当前最高置信猜想是“${selectedHypothesis.label}”，下一步适合做窄步教学而不是继续发散。`,
+    };
   }
 }

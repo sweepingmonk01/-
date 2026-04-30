@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import type { SocraticMessage, SocraticThread } from '../domain/types.js';
+import type { HypothesisSummary, SocraticMessage, SocraticThread } from '../domain/types.js';
 
 interface SQLiteSocraticThreadRepositoryOptions {
   dbFile: string;
@@ -18,6 +18,7 @@ interface SocraticThreadRow {
   pain_point: string | null;
   rule_text: string | null;
   rationale_json: string | null;
+  hypothesis_summary_json: string | null;
   messages_json: string;
   created_at: string;
   updated_at: string;
@@ -41,6 +42,7 @@ export class SQLiteSocraticThreadRepository {
         pain_point TEXT,
         rule_text TEXT,
         rationale_json TEXT,
+        hypothesis_summary_json TEXT,
         messages_json TEXT NOT NULL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
@@ -54,8 +56,8 @@ export class SQLiteSocraticThreadRepository {
   async create(thread: SocraticThread): Promise<SocraticThread> {
     this.db.prepare(`
       INSERT INTO socratic_threads (
-        id, student_id, cycle_id, job_id, status, title, agent_label, pain_point, rule_text, rationale_json, messages_json, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        id, student_id, cycle_id, job_id, status, title, agent_label, pain_point, rule_text, rationale_json, hypothesis_summary_json, messages_json, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       thread.id,
       thread.studentId,
@@ -67,6 +69,7 @@ export class SQLiteSocraticThreadRepository {
       thread.painPoint ?? null,
       thread.rule ?? null,
       thread.rationale ? JSON.stringify(thread.rationale) : null,
+      thread.hypothesisSummary ? JSON.stringify(thread.hypothesisSummary) : null,
       JSON.stringify(thread.messages),
       thread.createdAt,
       thread.updatedAt,
@@ -88,6 +91,7 @@ export class SQLiteSocraticThreadRepository {
     updates: {
       messages: SocraticMessage[];
       status?: SocraticThread['status'];
+      hypothesisSummary?: HypothesisSummary;
     },
   ): Promise<SocraticThread | null> {
     const current = await this.getById(id);
@@ -97,14 +101,21 @@ export class SQLiteSocraticThreadRepository {
       ...current,
       messages: updates.messages,
       status: updates.status ?? current.status,
+      hypothesisSummary: updates.hypothesisSummary ?? current.hypothesisSummary,
       updatedAt: new Date().toISOString(),
     };
 
     this.db.prepare(`
       UPDATE socratic_threads
-      SET messages_json = ?, status = ?, updated_at = ?
+      SET messages_json = ?, status = ?, hypothesis_summary_json = ?, updated_at = ?
       WHERE id = ?
-    `).run(JSON.stringify(next.messages), next.status, next.updatedAt, id);
+    `).run(
+      JSON.stringify(next.messages),
+      next.status,
+      next.hypothesisSummary ? JSON.stringify(next.hypothesisSummary) : null,
+      next.updatedAt,
+      id,
+    );
 
     return next;
   }
@@ -121,6 +132,9 @@ export class SQLiteSocraticThreadRepository {
       painPoint: row.pain_point ?? undefined,
       rule: row.rule_text ?? undefined,
       rationale: row.rationale_json ? JSON.parse(row.rationale_json) as string[] : undefined,
+      hypothesisSummary: row.hypothesis_summary_json
+        ? JSON.parse(row.hypothesis_summary_json) as HypothesisSummary
+        : undefined,
       messages: JSON.parse(row.messages_json) as SocraticMessage[],
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -136,6 +150,7 @@ export class SQLiteSocraticThreadRepository {
       { name: 'pain_point', sql: 'ALTER TABLE socratic_threads ADD COLUMN pain_point TEXT' },
       { name: 'rule_text', sql: 'ALTER TABLE socratic_threads ADD COLUMN rule_text TEXT' },
       { name: 'rationale_json', sql: 'ALTER TABLE socratic_threads ADD COLUMN rationale_json TEXT' },
+      { name: 'hypothesis_summary_json', sql: 'ALTER TABLE socratic_threads ADD COLUMN hypothesis_summary_json TEXT' },
     ];
 
     for (const column of requiredColumns) {

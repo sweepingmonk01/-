@@ -63,6 +63,7 @@ export class SocraticDiagnosticService {
       painPoint: input.painPoint,
       rule: input.rule,
       rationale: input.rationale,
+      hypothesisSummary: diagnosticContext.hypothesisSummary,
       messages: [
         {
           role: 'assistant',
@@ -130,6 +131,8 @@ export class SocraticDiagnosticService {
       rule: thread.rule,
       rationale: thread.rationale,
       messages: nextMessages,
+      previousHypothesisSummary: thread.hypothesisSummary,
+      latestStudentReply: content,
     });
     const assistantReply = await this.generateAssistantTurn({
       painPoint: thread.painPoint ?? '当前高频错点',
@@ -158,6 +161,7 @@ export class SocraticDiagnosticService {
     return this.deps.repository.updateMessages(threadId, {
       messages: nextMessages,
       status: userTurnCount >= 3 ? 'completed' : 'active',
+      hypothesisSummary: diagnosticContext.hypothesisSummary,
     });
   }
 
@@ -244,15 +248,25 @@ export class SocraticDiagnosticService {
     rule?: string;
     rationale?: string[];
     messages: SocraticMessage[];
+    previousHypothesisSummary?: HypothesisSummary;
+    latestStudentReply?: string;
   }) {
     const studentStateVector = await this.deps.stateVectors.getCurrentVector(input.studentId);
-    const hypothesisSummary = this.deps.hypothesisEngine.buildSummary({
+    const initialSummary = input.previousHypothesisSummary ?? this.deps.hypothesisEngine.buildSummary({
       painPoint: input.painPoint,
       rule: input.rule,
       rationale: input.rationale,
       stateVector: studentStateVector,
       messages: input.messages,
     });
+    const hypothesisSummary = input.latestStudentReply
+      ? this.deps.hypothesisEngine.updateSummary({
+          summary: initialSummary,
+          studentReply: input.latestStudentReply,
+          painPoint: input.painPoint,
+          rule: input.rule,
+        })
+      : initialSummary;
 
     return {
       studentStateVector,
@@ -269,12 +283,13 @@ export class SocraticDiagnosticService {
   ) {
     const selectedHypothesis = hypothesisSummary?.selectedHypothesis;
     const selectedProbe = hypothesisSummary?.selectedProbeAction;
+    const selectedIntervention = hypothesisSummary?.selectedIntervention;
 
     if (!hasUserReply) {
-      return `系统警报已触发。当前最高风险猜想是：${selectedHypothesis?.label ?? '规则未触发'}。${selectedProbe?.prompt ?? `告诉我：你是没看到题眼，还是看到了但没有触发“${rule ?? '当前核心规则'}”？`} 只回答最主要的一点。`;
+      return `系统警报已触发。当前最高风险猜想是：${selectedHypothesis?.label ?? '规则未触发'}。${selectedIntervention?.prompt ?? selectedProbe?.prompt ?? `告诉我：你是没看到题眼，还是看到了但没有触发“${rule ?? '当前核心规则'}”？`} 只回答最主要的一点。`;
     }
 
     const topRationale = rationale?.[0] ?? selectedHypothesis?.summary ?? '这次动作没有真正命中规则';
-    return `继续往下拆。当前猜想是：“${topRationale}”。${selectedProbe?.prompt ?? '现在请你用一句话回答：如果重来一次，你第一步会先看什么，再做什么？'}`;
+    return `继续往下拆。当前猜想是：“${topRationale}”。${selectedIntervention?.prompt ?? selectedProbe?.prompt ?? '现在请你用一句话回答：如果重来一次，你第一步会先看什么，再做什么？'}`;
   }
 }

@@ -46,13 +46,18 @@ test('SocraticDiagnosticService closes after three user turns', async () => {
   assert.equal(thread.status, 'active');
   assert.equal(thread.messages.length, 1);
   assert.match(thread.messages[0]?.content ?? '', /当前最高风险猜想/);
+  assert.equal(thread.hypothesisSummary?.source, 'heuristic-v1');
+  assert.ok(thread.hypothesisSummary?.selectedHypothesis);
 
   const reply1 = await service.reply(thread.id, '我第一眼没看到分母不一样。');
   const reply2 = await service.reply(thread.id, '我直接想算结果，没有先通分。');
   const reply3 = await service.reply(thread.id, '重来一次我会先找最小公倍数。');
 
   assert.equal(reply1?.status, 'active');
+  assert.ok((reply1?.hypothesisSummary?.lastUpdate?.updates.length ?? 0) >= 1);
   assert.equal(reply2?.status, 'active');
+  assert.ok(reply2?.hypothesisSummary?.selectedIntervention);
   assert.equal(reply3?.status, 'completed');
   assert.equal(reply3?.messages.filter((message) => message.role === 'user').length, 3);
+  assert.equal(reply3?.hypothesisSummary?.selectedIntervention?.type, 'review');
 });

@@ -95,6 +95,7 @@ export interface SocraticThread {
   painPoint?: string;
   rule?: string;
   rationale?: string[];
+  hypothesisSummary?: HypothesisSummary;
   messages: SocraticMessage[];
   createdAt: string;
   updatedAt: string;
@@ -123,6 +124,34 @@ export interface HypothesisSummary {
   candidates: HypothesisCandidate[];
   selectedHypothesis?: HypothesisCandidate;
   selectedProbeAction?: ProbeAction;
+  selectedIntervention?: HypothesisIntervention;
+  lastUpdate?: HypothesisUpdateResult;
+}
+
+export interface HypothesisConfidenceUpdate {
+  hypothesisId: string;
+  label: string;
+  previousConfidence: number;
+  nextConfidence: number;
+  delta: number;
+  reasons: string[];
+}
+
+export interface HypothesisIntervention {
+  id: string;
+  hypothesisId: string;
+  type: 'probe' | 'teach' | 'review';
+  prompt: string;
+  rationale: string;
+}
+
+export interface HypothesisUpdateResult {
+  source: 'heuristic-v1';
+  updatedAt: string;
+  updates: HypothesisConfidenceUpdate[];
+  selectedHypothesis?: HypothesisCandidate;
+  selectedProbeAction?: ProbeAction;
+  selectedIntervention?: HypothesisIntervention;
 }
 
 export interface GenerateSocraticTurnInput {
