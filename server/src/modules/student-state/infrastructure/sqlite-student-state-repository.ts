@@ -3,7 +3,8 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import type { StudentStateRepository } from '../domain/ports.js';
-import type { StudentStateSnapshot } from '../domain/types.js';
+import type { StudentStateSnapshot, StudentStateSnapshotInput } from '../domain/types.js';
+import { normalizeCognitiveState } from '../../../../../shared/cognitive-state.js';
 
 interface SQLiteStudentStateRepositoryOptions {
   dbFile: string;
@@ -46,11 +47,12 @@ export class SQLiteStudentStateRepository implements StudentStateRepository {
     `);
   }
 
-  async create(snapshot: Omit<StudentStateSnapshot, 'id' | 'createdAt'>): Promise<StudentStateSnapshot> {
+  async create(snapshot: StudentStateSnapshotInput): Promise<StudentStateSnapshot> {
     const record: StudentStateSnapshot = {
       id: randomUUID(),
-      createdAt: new Date().toISOString(),
+      createdAt: this.nextCreatedAt(snapshot.studentId),
       ...snapshot,
+      cognitiveState: normalizeCognitiveState(snapshot.cognitiveState),
     };
 
     this.db.prepare(`
@@ -124,12 +126,35 @@ export class SQLiteStudentStateRepository implements StudentStateRepository {
       sessionId: row.session_id ?? undefined,
       mediaJobId: row.media_job_id ?? undefined,
       interactionOutcome: row.interaction_outcome ?? undefined,
-      cognitiveState: JSON.parse(row.cognitive_state_json) as StudentStateSnapshot['cognitiveState'],
+      cognitiveState: normalizeCognitiveState(JSON.parse(row.cognitive_state_json)),
       profile: JSON.parse(row.profile_json) as StudentStateSnapshot['profile'],
       learningSignals: row.learning_signals_json
         ? (JSON.parse(row.learning_signals_json) as StudentStateSnapshot['learningSignals'])
         : undefined,
     };
+  }
+
+  private nextCreatedAt(studentId: string): string {
+    const candidate = new Date().toISOString();
+    const latestRow = this.db.prepare(`
+      SELECT created_at
+      FROM student_state_snapshots
+      WHERE student_id = ?
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT 1
+    `).get(studentId) as { created_at?: string } | undefined;
+
+    const latestCreatedAt = latestRow?.created_at;
+    if (!latestCreatedAt || latestCreatedAt < candidate) {
+      return candidate;
+    }
+
+    const bumpedMs = Date.parse(latestCreatedAt);
+    if (Number.isNaN(bumpedMs)) {
+      return candidate;
+    }
+
+    return new Date(bumpedMs + 1).toISOString();
   }
 
   private ensureParentDir(dbFile: string) {

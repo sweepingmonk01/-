@@ -1,6 +1,8 @@
 import { initializeApp } from "firebase/app";
 import { getAuth, GoogleAuthProvider, signInWithPopup, signOut } from "firebase/auth";
 import firebaseConfig from "../../firebase-applet-config.json";
+import { buildMobiusHeaders } from "./mobius-auth";
+import { normalizeCognitiveState, type CompatibleCognitiveState } from "../../shared/cognitive-state";
 
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
@@ -21,36 +23,41 @@ export const logoutUser = async () => {
 
 export const syncUserProfile = async (uid: string, data: any) => {
   if (uid === 'demo-student') return;
+  const payload = data && typeof data === 'object' && 'cognitiveState' in data
+    ? { ...data, cognitiveState: normalizeCognitiveState(data.cognitiveState) }
+    : data;
   const res = await fetch(`/api/mobius/students/${encodeURIComponent(uid)}/profile`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(data)
+    headers: await buildMobiusHeaders({ 'Content-Type': 'application/json' }),
+    body: JSON.stringify(payload)
   });
   if (!res.ok) throw new Error('API failed to sync profile');
 };
 
-export const updateCognitiveState = async (uid: string, changes: Partial<{focus: number, frustration: number, joy: number}>) => {
+export const updateCognitiveState = async (uid: string, nextState: CompatibleCognitiveState) => {
   if (uid === 'demo-student') return;
-  const profile = await getUserProfile(uid);
-  if (profile) {
-    const currentState = profile.cognitiveState || { focus: 50, frustration: 0, joy: 50 };
-    await syncUserProfile(uid, { cognitiveState: { ...currentState, ...changes } });
-  }
+  await syncUserProfile(uid, { cognitiveState: normalizeCognitiveState(nextState) });
 };
 
 export const getUserProfile = async (uid: string) => {
   if (uid === 'demo-student') return null;
-  const res = await fetch(`/api/mobius/students/${encodeURIComponent(uid)}/profile`);
+  const res = await fetch(`/api/mobius/students/${encodeURIComponent(uid)}/profile`, {
+    headers: await buildMobiusHeaders(),
+  });
   if (!res.ok) return null;
   const data = await res.json();
-  return Object.keys(data).length > 0 ? data : null;
+  if (!Object.keys(data).length) return null;
+
+  return data.cognitiveState
+    ? { ...data, cognitiveState: normalizeCognitiveState(data.cognitiveState) }
+    : data;
 };
 
 export const saveErrorRecord = async (uid: string, errorData: any) => {
   if (uid === 'demo-student') return;
   const res = await fetch(`/api/mobius/students/${encodeURIComponent(uid)}/errors`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: await buildMobiusHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(errorData)
   });
   if (!res.ok) throw new Error('API failed to save error record');
@@ -58,7 +65,9 @@ export const saveErrorRecord = async (uid: string, errorData: any) => {
 
 export const getActiveErrors = async (uid: string) => {
   if (uid === 'demo-student') return [];
-  const res = await fetch(`/api/mobius/students/${encodeURIComponent(uid)}/errors`);
+  const res = await fetch(`/api/mobius/students/${encodeURIComponent(uid)}/errors`, {
+    headers: await buildMobiusHeaders(),
+  });
   if (!res.ok) return [];
   const payload = await res.json();
   return payload.items || [];
@@ -67,8 +76,8 @@ export const getActiveErrors = async (uid: string) => {
 export const resolveError = async (uid: string, errorId: string) => {
   if (uid === 'demo-student') return;
   const res = await fetch(`/api/mobius/students/${encodeURIComponent(uid)}/errors/${encodeURIComponent(errorId)}/resolve`, {
-    method: 'PATCH'
+    method: 'PATCH',
+    headers: await buildMobiusHeaders(),
   });
   if (!res.ok) throw new Error('API failed to resolve error record');
 };
-

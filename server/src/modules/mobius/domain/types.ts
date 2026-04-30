@@ -1,14 +1,13 @@
 import type { DiagnosedMistakePattern, ErrorRecord, KnowledgeAction } from '../../learning/domain/protocol.js';
+import type { SocraticThread } from '../../ai/domain/types.js';
+import type { StudentStateVector } from '../../student-state/domain/types.js';
+import type {
+  CognitiveState,
+  CompatibleCognitiveState,
+} from '../../../../../shared/cognitive-state.js';
 
 export type EmotionLabel = 'calm' | 'focused' | 'encouraging' | 'protective' | 'urgent';
-
-export interface CognitiveState {
-  focus: number;
-  frustration: number;
-  joy: number;
-  confidence: number;
-  fatigue: number;
-}
+export type { CognitiveState, CompatibleCognitiveState, LegacyCognitiveState } from '../../../../../shared/cognitive-state.js';
 
 export interface LearningSignalInput {
   responseTimeMs?: number;
@@ -29,7 +28,7 @@ export interface StudentContext {
   diagnosedMistakes?: DiagnosedMistakePattern[];
   knowledgeAction?: KnowledgeAction;
   timeSavedMinutes?: number;
-  previousState?: Partial<CognitiveState>;
+  previousState?: CompatibleCognitiveState;
   learningSignals?: LearningSignalInput;
 }
 
@@ -41,6 +40,46 @@ export interface StoryBeatPlan {
   failureScene: string;
   visualStyle: string;
   knowledgeAction?: KnowledgeAction;
+  strategyDecision: StrategyDecision;
+}
+
+export type StrategyKind = 'probe' | 'teach' | 'review';
+
+export type StrategyFeatureKey =
+  | 'painPointRecurrence'
+  | 'timePressure'
+  | 'noisePressure'
+  | 'emotionRisk'
+  | 'masteryGap'
+  | 'recentFailurePressure'
+  | 'recentSuccessRecovery';
+
+export interface StrategyScoreFeature {
+  label: string;
+  value: number;
+  weight: number;
+  contribution: number;
+}
+
+export type StrategyScoreBreakdown = Record<StrategyFeatureKey, StrategyScoreFeature>;
+
+export interface StrategyCandidate {
+  strategy: StrategyKind;
+  baseScore: number;
+  score: number;
+  scoreBreakdown: StrategyScoreBreakdown;
+  rationale: string;
+}
+
+export interface StrategyDecision {
+  candidates: StrategyCandidate[];
+  selectedStrategy: StrategyKind;
+}
+
+export interface StrategySchedulerInput {
+  context: StudentContext;
+  cognitiveState: CognitiveState;
+  stateVector?: StudentStateVector | null;
 }
 
 export type InteractionOutcome = 'success' | 'failure';
@@ -63,16 +102,19 @@ export interface InteractionRecord {
 }
 
 export interface InteractionResolution {
+  cycleId?: string;
   outcome: InteractionOutcome;
   title: string;
   narration: string;
   coachMessage: string;
   nextActions: string[];
+  strategyDecision: StrategyDecision;
   adjudication?: {
     outcome: InteractionOutcome;
     rationale: string[];
   };
   video?: MediaAsset;
+  diagnosticThread?: SocraticThread;
 }
 
 export interface SeedancePromptBundle {
@@ -81,6 +123,10 @@ export interface SeedancePromptBundle {
   prompt: string;
   durationSeconds: number;
   aspectRatio: '9:16' | '16:9' | '1:1';
+  referenceImages?: string[];
+  audioMode?: 'none' | 'ambient' | 'speech';
+  resolution?: '480p' | '720p' | '1080p';
+  webhookUrl?: string;
   fallbackStoryboard: string[];
 }
 
@@ -95,11 +141,13 @@ export interface MediaAsset {
 }
 
 export interface MobiusSessionPlan {
+  cycleId: string;
   sessionId: string;
   studentId: string;
   createdAt: string;
   cognitiveState: CognitiveState;
   errorProfile: ErrorRecord;
+  strategyDecision: StrategyDecision;
   story: StoryBeatPlan;
   video: MediaAsset;
   nextActions: string[];

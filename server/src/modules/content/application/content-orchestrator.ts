@@ -1,10 +1,13 @@
-import type { ExamQuestion, ErrorToContentInput, ErrorToContentResolution, KnowledgePoint, QuestionMatch } from '../domain/types.js';
+import type { ContentCatalog } from '../domain/ports.js';
+import type {
+  ErrorToContentInput,
+  ErrorToContentResolution,
+  FoundationKnowledgeMatch,
+  FoundationKnowledgeNode,
+  KnowledgePoint,
+  QuestionMatch,
+} from '../domain/types.js';
 import type { DiagnosedMistakePattern, KnowledgeAction, MistakeCategory } from '../../learning/domain/protocol.js';
-
-interface ContentCatalog {
-  listKnowledgePoints(): Promise<KnowledgePoint[]>;
-  listExamQuestions(): Promise<ExamQuestion[]>;
-}
 
 interface ContentOrchestratorDeps {
   catalog: ContentCatalog;
@@ -15,10 +18,32 @@ const normalize = (value: string) => value.toLowerCase();
 export class ContentOrchestrator {
   constructor(private readonly deps: ContentOrchestratorDeps) {}
 
+  listKnowledgePoints(query: Parameters<ContentCatalog['listKnowledgePoints']>[0]) {
+    return this.deps.catalog.listKnowledgePoints(query);
+  }
+
+  getKnowledgePointNeighborhood(id: string) {
+    return this.deps.catalog.getKnowledgePointNeighborhood(id);
+  }
+
+  listFoundationKnowledgeNodes(query: Parameters<ContentCatalog['listFoundationKnowledgeNodes']>[0]) {
+    return this.deps.catalog.listFoundationKnowledgeNodes(query);
+  }
+
+  listFoundationKnowledgeEdges(query: Parameters<ContentCatalog['listFoundationKnowledgeEdges']>[0]) {
+    return this.deps.catalog.listFoundationKnowledgeEdges(query);
+  }
+
+  getFoundationKnowledgeNode(key: string) {
+    return this.deps.catalog.getFoundationKnowledgeNode(key);
+  }
+
   async resolveErrorContext(input: ErrorToContentInput): Promise<ErrorToContentResolution> {
-    const [knowledgePoints, examQuestions] = await Promise.all([
+    const [knowledgePoints, examQuestions, foundationNodes, foundationEdges] = await Promise.all([
       this.deps.catalog.listKnowledgePoints(),
       this.deps.catalog.listExamQuestions(),
+      this.deps.catalog.listFoundationKnowledgeNodes(),
+      this.deps.catalog.listFoundationKnowledgeEdges(),
     ]);
 
     const corpus = normalize([input.painPoint, input.rule, input.questionText].filter(Boolean).join(' '));
@@ -90,8 +115,17 @@ export class ContentOrchestrator {
     const topKnowledgePoint = matchedKnowledgePoints[0]?.knowledgePoint;
     const diagnosedMistakes = this.buildDiagnosedMistakes(input, topKnowledgePoint);
     const knowledgeAction = this.buildKnowledgeAction(input, topKnowledgePoint, diagnosedMistakes[0]?.category);
+    const recommendedFoundationNodes = this.buildFoundationRecommendations({
+      corpus,
+      nodes: foundationNodes,
+      edges: foundationEdges,
+      matchedKnowledgePoints: matchedKnowledgePoints.map((item) => item.knowledgePoint),
+      diagnosedMistakes,
+      topKnowledgePoint,
+    });
     const evidence = [
       ...matchedKnowledgePoints.flatMap((item) => item.reasons.slice(0, 2)),
+      ...recommendedFoundationNodes.slice(0, 1).flatMap((item) => item.reasons.slice(0, 2).map((reason) => `基础科学: ${reason}`)),
       ...relatedQuestions.slice(0, 2).map((item) => `相似真题: ${item.question.year} ${item.question.region} ${item.question.questionType}`),
     ].slice(0, 5);
 
@@ -107,6 +141,7 @@ export class ContentOrchestrator {
         knowledgeAction,
       },
       matchedKnowledgePoints,
+      recommendedFoundationNodes,
       relatedQuestions,
       recommendedStorySeed: {
         painPoint: input.painPoint,
@@ -118,6 +153,99 @@ export class ContentOrchestrator {
         knowledgeAction,
       },
     };
+  }
+
+  private buildFoundationRecommendations(input: {
+    corpus: string;
+    nodes: FoundationKnowledgeNode[];
+    edges: Awaited<ReturnType<ContentCatalog['listFoundationKnowledgeEdges']>>;
+    matchedKnowledgePoints: KnowledgePoint[];
+    diagnosedMistakes: ReturnType<ContentOrchestrator['buildDiagnosedMistakes']>;
+    topKnowledgePoint?: KnowledgePoint;
+  }): FoundationKnowledgeMatch[] {
+    const matchedCurriculumIds = new Set(input.matchedKnowledgePoints.map((item) => item.id));
+    const mistakeCategories = new Set(input.diagnosedMistakes.map((item) => item.category));
+    const keywordHints = this.foundationFallbackHints(input.corpus, input.topKnowledgePoint);
+
+    const matches = input.nodes
+      .map((node) => {
+        const reasons: string[] = [];
+        let score = 0;
+
+        const curriculumHits = node.relatedCurriculumNodes.filter((id) => matchedCurriculumIds.has(id));
+        if (curriculumHits.length) {
+          score += 12 + curriculumHits.length * 2;
+          reasons.push(`课内知识点映射: ${curriculumHits.join(', ')}`);
+        }
+
+        const mistakeHits = node.relatedMistakePatterns.filter((pattern) => mistakeCategories.has(pattern as any));
+        if (mistakeHits.length) {
+          score += 7 + mistakeHits.length;
+          reasons.push(`错因类型映射: ${mistakeHits.join(', ')}`);
+        }
+
+        const keywordHits = node.keywords.filter((keyword) => input.corpus.includes(normalize(keyword)));
+        if (keywordHits.length) {
+          score += keywordHits.length * 2;
+          reasons.push(`命中基础科学关键词: ${keywordHits.slice(0, 3).join(', ')}`);
+        }
+
+        const fallbackHint = keywordHints[node.key];
+        if (fallbackHint) {
+          score += fallbackHint.score;
+          reasons.push(fallbackHint.reason);
+        }
+
+        const edges = input.edges.filter((edge) => edge.source === node.key || edge.target === node.key);
+
+        return {
+          node,
+          score,
+          reasons,
+          edges,
+        };
+      })
+      .filter((item) => item.score > 0)
+      .sort((left, right) => right.score - left.score)
+      .slice(0, 3);
+
+    if (matches.length) return matches;
+
+    const defaultNode = input.nodes.find((node) => node.key === 'neuroscience.learning_memory') ?? input.nodes[0];
+    if (!defaultNode) return [];
+
+    return [{
+      node: defaultNode,
+      score: 1,
+      reasons: ['默认把错题修复连接到学习与记忆机制。'],
+      edges: input.edges.filter((edge) => edge.source === defaultNode.key || edge.target === defaultNode.key),
+    }];
+  }
+
+  private foundationFallbackHints(corpus: string, topKnowledgePoint?: KnowledgePoint) {
+    const hints: Record<string, { score: number; reason: string }> = {};
+    const title = topKnowledgePoint?.title ?? '';
+
+    if (/中点|辅助线|全等|范围|几何/.test(corpus) || /中点|几何/.test(title)) {
+      hints['physics.classical_mechanics'] = { score: 5, reason: '几何辅助线可迁移到力学中的因果链和模型选择。' };
+      hints['physics.symmetry_conservation'] = { score: 8, reason: '中点、全等和等量关系可迁移到对称性与守恒思维。' };
+    }
+
+    if (/there is|there are|最近主语|单数|复数/.test(corpus)) {
+      hints['neuroscience.learning_memory'] = { score: 8, reason: '语法规则召回可用学习与记忆机制解释。' };
+      hints['neuroscience.cognition_consciousness'] = { score: 5, reason: '就近一致需要注意选择和执行控制。' };
+    }
+
+    if (/多音字|词义|语境|银行|成长/.test(corpus)) {
+      hints['neuroscience.cognition_consciousness'] = { score: 8, reason: '语境判读依赖注意选择、决策和元认知自检。' };
+      hints['neuroscience.learning_memory'] = { score: 6, reason: '多音字稳定提取依赖记忆巩固和提取练习。' };
+    }
+
+    if (/疲劳|注意|分心|粗心|看错|漏看/.test(corpus)) {
+      hints['neuroscience.cognition_consciousness'] = { score: 9, reason: '注意丢失和粗心错因直接连接认知与意识。' };
+    }
+
+    return hints;
   }
 
   private buildDiagnosedMistakes(input: ErrorToContentInput, knowledgePoint?: KnowledgePoint): DiagnosedMistakePattern[] {

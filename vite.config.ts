@@ -27,5 +27,34 @@ export default defineConfig(({mode}) => {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'process.env.MOBIUS_API_BASE_URL': JSON.stringify(env.MOBIUS_API_BASE_URL || ''),
     },
+    build: {
+      rollupOptions: {
+        output: {
+          manualChunks(id) {
+            if (!id.includes('node_modules')) return;
+
+            if (id.includes('/hls.js/')) {
+              return 'theater-codecs';
+            }
+
+            if (id.includes('/recharts/')) {
+              return 'dashboard-charts';
+            }
+
+            if (id.includes('/firebase/')) {
+              return 'firebase';
+            }
+
+            if (id.includes('/motion/') || id.includes('/framer-motion/')) {
+              return 'motion';
+            }
+
+            if (id.includes('/react/') || id.includes('/react-dom/') || id.includes('/scheduler/')) {
+              return 'react-vendor';
+            }
+          },
+        },
+      },
+    },
   };
 });

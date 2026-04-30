@@ -1,75 +1,58 @@
 import type { MistakeCategory } from '../../learning/domain/protocol.js';
 import type { StudentStateRepository } from '../domain/ports.js';
-import type { StudentStateSnapshot, StudentStateSummary } from '../domain/types.js';
+import type { StudentStateSummary } from '../domain/types.js';
+import { StateVectorService } from './state-vector-service.js';
 
 interface StudentStateSummaryServiceDeps {
   repository: StudentStateRepository;
+  stateVectors: StateVectorService;
 }
 
 export class StudentStateSummaryService {
   constructor(private readonly deps: StudentStateSummaryServiceDeps) {}
 
   async getStudentStateSummary(studentId: string): Promise<StudentStateSummary | null> {
-    const snapshots = await this.deps.repository.listByStudent(studentId, 50, 0); // Recent bounded memory limit (RAG buffer equivalent for history)
-    if (snapshots.length === 0) return null;
-
-    const ordered = [...snapshots].sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-    const latest = ordered[0];
-    const recentPainPoints = this.collectUnique(ordered.map((snapshot) => snapshot.profile.painPoint), 3);
-    const activeRules = this.collectUnique(ordered.map((snapshot) => snapshot.profile.rule), 3);
-    const interactionSnapshots = ordered.filter((snapshot) => snapshot.source === 'interaction-resolved');
+    const [vector, latest] = await Promise.all([
+      this.deps.stateVectors.getCurrentVector(studentId),
+      this.deps.repository.getLatestByStudent(studentId),
+    ]);
+    if (!vector || !latest) return null;
 
     let stats = {
-      totalSnapshots: ordered.length,
-      totalSessions: ordered.filter((snapshot) => snapshot.source === 'session-created').length,
-      interactionSuccessCount: interactionSnapshots.filter((snapshot) => snapshot.interactionOutcome === 'success').length,
-      interactionFailureCount: interactionSnapshots.filter((snapshot) => snapshot.interactionOutcome === 'failure').length,
+      totalSnapshots: vector.snapshotCount,
+      totalSessions: latest.source === 'session-created' ? 1 : 0,
+      interactionSuccessCount: vector.sessionContext.recentSuccessCount,
+      interactionFailureCount: vector.sessionContext.recentFailureCount,
     };
 
     if (this.deps.repository.getStatsByStudent) {
       stats = await this.deps.repository.getStatsByStudent(studentId);
     }
 
-    const mistakeCategoryCounts = ordered.reduce<Partial<Record<MistakeCategory, number>>>((counts, snapshot) => {
-      for (const category of snapshot.profile.diagnosedMistakeCategories) {
-        counts[category] = (counts[category] ?? 0) + 1;
-      }
-      return counts;
-    }, {});
-
     return {
       studentId,
+      stateVectorVersion: vector.version,
       latestSnapshotAt: latest.createdAt,
       totalSnapshots: stats.totalSnapshots,
       totalSessions: stats.totalSessions,
       interactionStats: {
         successCount: stats.interactionSuccessCount,
         failureCount: stats.interactionFailureCount,
-        lastOutcome: interactionSnapshots[0]?.interactionOutcome,
+        lastOutcome: vector.sessionContext.latestInteractionOutcome,
       },
-      currentCognitiveState: latest.cognitiveState,
-      recentPainPoints,
-      activeRules,
-      mistakeCategoryCounts,
+      currentCognitiveState: vector.cognitive,
+      recentPainPoints: vector.recentPainPoints,
+      activeRules: vector.activeRules,
+      mistakeCategoryCounts: vector.mistakeCategoryCounts as Partial<Record<MistakeCategory, number>>,
       recommendedSessionDefaults: {
-        grade: latest.profile.grade,
-        targetScore: latest.profile.targetScore,
-        painPoint: latest.profile.painPoint,
-        rule: latest.profile.rule,
-        previousState: latest.cognitiveState,
-        knowledgeActionId: latest.profile.knowledgeActionId,
-        knowledgeActionType: latest.profile.knowledgeActionType,
+        grade: vector.sessionContext.grade,
+        targetScore: vector.sessionContext.targetScore,
+        painPoint: vector.sessionContext.currentPainPoint ?? latest.profile.painPoint,
+        rule: vector.sessionContext.currentRule ?? latest.profile.rule,
+        previousState: vector.cognitive,
+        knowledgeActionId: vector.sessionContext.knowledgeActionId,
+        knowledgeActionType: vector.sessionContext.knowledgeActionType,
       },
     };
-  }
-
-  private collectUnique(values: string[], limit: number): string[] {
-    const unique: string[] = [];
-    for (const value of values) {
-      if (!value || unique.includes(value)) continue;
-      unique.push(value);
-      if (unique.length >= limit) break;
-    }
-    return unique;
   }
 }

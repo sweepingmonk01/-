@@ -1,6 +1,10 @@
 import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import {
+  createDefaultCognitiveState,
+  normalizeCognitiveState,
+} from '../../../../../shared/cognitive-state.js';
 
 export interface StudentProfile {
   studentId: string;
@@ -72,6 +76,7 @@ export class SQLiteStudentProfileRepository {
     const profile = JSON.parse(row.profile_json);
     return {
       ...profile,
+      cognitiveState: normalizeCognitiveState(profile.cognitiveState),
       studentId,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
@@ -87,7 +92,7 @@ export class SQLiteStudentProfileRepository {
         timeSaved: 0,
         grade: '',
         textbooks: { zh: '部编版(人教)', ma: '人教版', en: '人教PEP' },
-        cognitiveState: { focus: 50, frustration: 0, joy: 50 },
+        cognitiveState: createDefaultCognitiveState(),
         theaterCueEnabled: true,
         todayTaskStatus: {},
         taskStatusDate: '',
@@ -97,7 +102,14 @@ export class SQLiteStudentProfileRepository {
       };
     }
     
-    const next = { ...current, ...updates, updatedAt: new Date().toISOString() };
+    const next = {
+      ...current,
+      ...updates,
+      cognitiveState: updates.cognitiveState === undefined
+        ? current.cognitiveState
+        : normalizeCognitiveState(updates.cognitiveState),
+      updatedAt: new Date().toISOString(),
+    };
     const { studentId: _sid, createdAt: _ca, updatedAt: _ua, ...profileData } = next;
     
     this.db.prepare(`
