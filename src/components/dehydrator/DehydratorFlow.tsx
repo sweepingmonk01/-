@@ -66,6 +66,7 @@ export default function DehydratorFlow({
   if (!dehydrateData) return null;
 
   const savedMins = (dehydrateData.trashEasy + dehydrateData.dropHard) * 5;
+  const strategicPlan = dehydrateData.strategicPlan;
 
   return (
     <motion.div
@@ -121,28 +122,76 @@ export default function DehydratorFlow({
           <div className="text-2xl font-black text-[#1a1a2e]">{dehydrateData.mustDoIndices || '无，全部免做！'}</div>
         </div>
 
-        {dehydrateData.strategicPlan && (
+        {strategicPlan && (
           <div className="mb-10 space-y-4">
             <div className="game-card rounded-2xl border border-[var(--color-primary)]/25 p-4">
               <p className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--color-primary)]">ROI 战略规划官</p>
-              <h3 className="mt-2 text-xl font-black text-[#1a1a2e]">{dehydrateData.strategicPlan.commanderBriefing}</h3>
-              <p className="mt-2 text-sm font-bold leading-6 text-[var(--color-primary)]">{dehydrateData.strategicPlan.immediateOrder}</p>
+              <h3 className="mt-2 text-xl font-black text-[#1a1a2e]">{strategicPlan.commanderBriefing}</h3>
+              <p className="mt-2 text-sm font-bold leading-6 text-[var(--color-primary)]">{strategicPlan.immediateOrder}</p>
             </div>
 
-            {!!dehydrateData.strategicPlan.weakTopicAlerts.length && (
+            {!!strategicPlan.focusKnowledgePoints.length && (
+              <div className="game-card rounded-2xl border border-[var(--color-secondary)]/20 bg-[linear-gradient(180deg,rgba(255,178,82,0.10),rgba(255,255,255,0.98))] p-4">
+                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-[var(--color-secondary)]">主决策焦点</p>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {strategicPlan.focusKnowledgePoints.map((item) => (
+                    <span
+                      key={item}
+                      className="rounded-full border border-[var(--color-secondary)]/25 bg-white px-3 py-1.5 text-xs font-black text-[#1a1a2e]"
+                    >
+                      {item}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!!strategicPlan.visualSignals?.length && (
+              <div className="game-card rounded-2xl border border-sky-400/20 bg-[linear-gradient(180deg,rgba(84,163,255,0.10),rgba(255,255,255,0.98))] p-4">
+                <p className="text-[11px] font-black uppercase tracking-[0.16em] text-sky-600">多模态轻信号</p>
+                <div className="mt-3 space-y-3">
+                  {strategicPlan.visualSignals.map((signal) => (
+                    <div key={`${signal.kind}-${signal.label}`} className="rounded-2xl border border-white/70 bg-white/88 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-black text-[#1a1a2e]">{signal.label}</p>
+                          <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.12em] text-gray-400">
+                            {renderSignalKind(signal.kind)} · 置信 {Math.round(signal.confidence * 100)}%
+                          </p>
+                        </div>
+                        <span className={`rounded-full px-2.5 py-1 text-[10px] font-black ${signalToneClass(signal.severity)}`}>
+                          {renderSeverity(signal.severity)}
+                        </span>
+                      </div>
+                      {!!signal.evidence.length && (
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          {signal.evidence.map((item) => (
+                            <span key={item} className="rounded-full bg-slate-100 px-2.5 py-1 text-[11px] font-bold text-slate-600">
+                              {item}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!!strategicPlan.weakTopicAlerts.length && (
               <div className="game-card rounded-2xl border border-red-400/20 bg-[linear-gradient(180deg,rgba(255,95,162,0.08),rgba(255,255,255,0.96))] p-4">
                 <p className="text-[11px] font-black uppercase tracking-[0.16em] text-red-400">高风险提醒</p>
                 <div className="mt-2 space-y-2">
-                  {dehydrateData.strategicPlan.weakTopicAlerts.map((item) => (
+                  {strategicPlan.weakTopicAlerts.map((item) => (
                     <p key={item} className="text-sm font-bold text-[#1a1a2e]">{item}</p>
                   ))}
                 </div>
               </div>
             )}
 
-            {!!dehydrateData.strategicPlan.questionPlans.length && (
+            {!!strategicPlan.questionPlans.length && (
               <div className="space-y-3">
-                {dehydrateData.strategicPlan.questionPlans.slice(0, 6).map((plan) => (
+                {strategicPlan.questionPlans.slice(0, 6).map((plan) => (
                   <div key={plan.questionLabel} className="game-card rounded-2xl p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -193,3 +242,22 @@ export default function DehydratorFlow({
     </motion.div>
   );
 }
+
+const renderSignalKind = (kind: string) => {
+  if (kind === 'image-format') return '输入格式';
+  if (kind === 'page-shape') return '版式判断';
+  if (kind === 'detail-density') return '细节密度';
+  return '采集风险';
+};
+
+const renderSeverity = (severity: string) => {
+  if (severity === 'risk') return '高风险';
+  if (severity === 'watch') return '需留意';
+  return '已记录';
+};
+
+const signalToneClass = (severity: string) => {
+  if (severity === 'risk') return 'bg-rose-100 text-rose-600';
+  if (severity === 'watch') return 'bg-amber-100 text-amber-700';
+  return 'bg-emerald-100 text-emerald-700';
+};
