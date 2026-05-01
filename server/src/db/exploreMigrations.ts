@@ -14,6 +14,7 @@ export function runExploreMigrations(db: DatabaseSync) {
       accepted_completed_nodes INTEGER NOT NULL DEFAULT 0,
       accepted_task_results INTEGER NOT NULL DEFAULT 0,
       accepted_media_tasks INTEGER NOT NULL DEFAULT 0,
+      accepted_transfer_attempts INTEGER NOT NULL DEFAULT 0,
       raw_snapshot_json TEXT NOT NULL,
       created_at TEXT NOT NULL
     );
@@ -103,6 +104,30 @@ export function runExploreMigrations(db: DatabaseSync) {
       created_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS explore_transfer_attempts (
+      id TEXT PRIMARY KEY,
+      source_node_key TEXT NOT NULL,
+      source_evidence_id TEXT,
+      structure_key TEXT NOT NULL,
+      structure_label TEXT NOT NULL,
+      structure_engine_key TEXT,
+      target_domain TEXT NOT NULL,
+      target_task_json TEXT NOT NULL,
+      user_application TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      rubric_score REAL NOT NULL,
+      rubric_json TEXT NOT NULL,
+      recommended_repair_node_key TEXT,
+      state_before_json TEXT NOT NULL,
+      state_after_json TEXT NOT NULL,
+      user_id TEXT,
+      student_id TEXT,
+      device_id TEXT,
+      session_id TEXT,
+      raw_json TEXT NOT NULL,
+      created_at TEXT NOT NULL
+    );
+
     CREATE INDEX IF NOT EXISTS idx_explore_sync_batches_created_at
     ON explore_sync_batches (created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_explore_completed_nodes_batch
@@ -113,5 +138,15 @@ export function runExploreMigrations(db: DatabaseSync) {
     ON explore_media_tasks (batch_id);
     CREATE INDEX IF NOT EXISTS idx_explore_learning_profile_snapshots_scope
     ON explore_learning_profile_snapshots (user_id, student_id, generated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_explore_transfer_attempts_scope
+    ON explore_transfer_attempts (user_id, student_id, created_at DESC);
   `);
+
+  try {
+    db.exec(`
+      ALTER TABLE explore_sync_batches ADD COLUMN accepted_transfer_attempts INTEGER NOT NULL DEFAULT 0;
+    `);
+  } catch {
+    // Column already exists on migrated databases.
+  }
 }

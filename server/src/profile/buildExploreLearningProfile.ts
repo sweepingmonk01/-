@@ -24,11 +24,27 @@ export function buildExploreLearningProfile(
 
   const evidenceDensity = safeRatio(input.taskResults, Math.max(3, input.completedNodes));
   const quality = clamp01(input.averageTaskQuality || 0);
+  const transferQuality = clamp01(input.averageTransferRubricScore ?? 0);
+  const transferScores = input.transferEngineScores ?? {
+    worldEngine: 0,
+    mindEngine: 0,
+    meaningEngine: 0,
+    gameTopologyEngine: 0,
+    unknown: 0,
+  };
 
-  const worldModelIndex = clamp01(0.18 + safeRatio(worldRaw, 3) * 0.55 + quality * 0.27);
-  const mindModelIndex = clamp01(0.18 + safeRatio(mindRaw, 3) * 0.55 + quality * 0.27);
-  const meaningModelIndex = clamp01(0.18 + safeRatio(meaningRaw, 3) * 0.55 + quality * 0.27);
-  const actionMechanismIndex = clamp01(0.15 + safeRatio(gameRaw, 3) * 0.55 + evidenceDensity * 0.3);
+  const worldModelIndex = clamp01(
+    0.18 + safeRatio(worldRaw, 3) * 0.48 + quality * 0.22 + clamp01(transferScores.worldEngine) * 0.25,
+  );
+  const mindModelIndex = clamp01(
+    0.18 + safeRatio(mindRaw, 3) * 0.48 + quality * 0.22 + clamp01(transferScores.mindEngine) * 0.25,
+  );
+  const meaningModelIndex = clamp01(
+    0.18 + safeRatio(meaningRaw, 3) * 0.48 + quality * 0.22 + clamp01(transferScores.meaningEngine) * 0.25,
+  );
+  const actionMechanismIndex = clamp01(
+    0.15 + safeRatio(gameRaw, 3) * 0.48 + evidenceDensity * 0.24 + clamp01(transferScores.gameTopologyEngine) * 0.28,
+  );
 
   const engineValues = {
     world: worldModelIndex,
@@ -64,6 +80,7 @@ export function buildExploreLearningProfile(
       meaningModelIndex * 0.25 +
       actionMechanismIndex * 0.15 +
       quality * 0.1 +
+      transferQuality * 0.12 +
       balanceBonus,
   );
 
@@ -71,8 +88,14 @@ export function buildExploreLearningProfile(
     activeStructuralIntelligence,
     input.completedNodes,
     input.taskResults,
+    input.successfulTransferAttempts ?? 0,
   );
-  const recommendation = getRecommendationByWeakness(dominantWeakness);
+  const recommendation = input.latestTransferOutcome === 'failure' && input.latestTransferRepairNodeKey
+    ? {
+        nodeKey: input.latestTransferRepairNodeKey,
+        text: '最近一次结构迁移失败，建议先回到对应修复节点，补齐结构识别、映射、动作和结果解释。',
+      }
+    : getRecommendationByWeakness(dominantWeakness);
 
   return {
     worldModelIndex,
@@ -98,9 +121,11 @@ function getProfileStage(
   asi: number,
   completedNodes: number,
   taskResults: number,
+  successfulTransferAttempts: number,
 ): ExploreLearningProfile['stage'] {
   if (completedNodes <= 0) return 'seed';
-  if (asi < 0.35 || taskResults <= 1) return 'forming';
+  if (asi < 0.35 || (taskResults <= 1 && successfulTransferAttempts <= 0)) return 'forming';
+  if (successfulTransferAttempts <= 0) return 'connecting';
   if (asi < 0.55) return 'connecting';
   if (asi < 0.75) return 'integrating';
   return 'structural';

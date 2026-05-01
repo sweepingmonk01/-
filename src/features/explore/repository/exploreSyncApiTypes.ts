@@ -13,6 +13,7 @@ export interface ExploreSyncAcceptedCounts {
   completedNodes: number;
   taskResults: number;
   mediaTasks: number;
+  transferAttempts: number;
 }
 
 export interface ExploreSyncApiErrorItem {

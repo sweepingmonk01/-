@@ -9,6 +9,9 @@ import type {
   ExploreSyncSaveResult,
   ExploreSyncBatchSummary,
   ExploreSyncStore,
+  ExploreTransferAttemptInput,
+  ExploreTransferAttemptListInput,
+  ExploreTransferAttemptRecord,
   SaveExploreSyncSnapshotInput,
 } from './exploreSyncStoreTypes.js';
 
@@ -20,10 +23,12 @@ export interface ExploreSyncMemoryRecord {
     completedNodes: number;
     taskResults: number;
     mediaTasks: number;
+    transferAttempts: number;
   };
 }
 
 const records: ExploreSyncMemoryRecord[] = [];
+const transferAttempts: ExploreTransferAttemptRecord[] = [];
 const profileSnapshots: Array<ExploreLearningProfileHistoryItem & {
   userScope: ExploreScopeFilter;
 }> = [];
@@ -36,6 +41,7 @@ export function saveExploreSyncSnapshot(request: SaveExploreSyncSnapshotInput): 
   const completedNodes = asArray(request.snapshot.completedNodes);
   const taskResults = asArray(request.snapshot.taskResults);
   const mediaTasks = asArray(request.snapshot.mediaTasks);
+  const snapshotTransferAttempts = asArray(request.snapshot.transferAttempts);
   const record: ExploreSyncMemoryRecord = {
     remoteBatchId: `batch_${Date.now()}`,
     syncedAt: new Date().toISOString(),
@@ -44,10 +50,17 @@ export function saveExploreSyncSnapshot(request: SaveExploreSyncSnapshotInput): 
       completedNodes: completedNodes.length,
       taskResults: taskResults.length,
       mediaTasks: mediaTasks.length,
+      transferAttempts: snapshotTransferAttempts.length,
     },
   };
 
   records.unshift(record);
+  transferAttempts.unshift(...snapshotTransferAttempts.map((item, index) => ({
+    ...(item as ExploreTransferAttemptRecord),
+    id: typeof (item as { id?: unknown }).id === 'string'
+      ? (item as { id: string }).id
+      : `transfer_${Date.now()}_${index}`,
+  })));
 
   return {
     remoteBatchId: record.remoteBatchId,
@@ -62,6 +75,7 @@ export function getExploreSyncRecords() {
 
 export function clearExploreSyncRecords() {
   records.splice(0, records.length);
+  transferAttempts.splice(0, transferAttempts.length);
   profileSnapshots.splice(0, profileSnapshots.length);
 }
 
@@ -77,6 +91,7 @@ export class MemoryExploreSyncStore implements ExploreSyncStore {
     const completedNodes = matched.flatMap((snapshot) => asArray(snapshot.completedNodes));
     const taskResults = matched.flatMap((snapshot) => asArray(snapshot.taskResults));
     const mediaTasks = matched.flatMap((snapshot) => asArray(snapshot.mediaTasks));
+    const matchedTransferAttempts = transferAttempts.filter((item) => matchesScope(item.userScope, input));
 
     return {
       snapshot: {
@@ -84,6 +99,7 @@ export class MemoryExploreSyncStore implements ExploreSyncStore {
         completedNodes: completedNodes as Record<string, unknown>[],
         taskResults: taskResults as Record<string, unknown>[],
         mediaTasks: mediaTasks as Record<string, unknown>[],
+        transferAttempts: matchedTransferAttempts as unknown as Record<string, unknown>[],
         exportedAt: new Date().toISOString(),
         schemaVersion: 'explore-remote-v0.1',
       },
@@ -91,25 +107,42 @@ export class MemoryExploreSyncStore implements ExploreSyncStore {
         completedNodes: completedNodes.length,
         taskResults: taskResults.length,
         mediaTasks: mediaTasks.length,
+        transferAttempts: matchedTransferAttempts.length,
       },
     };
   }
 
   getProgress(input: ExploreScopeFilter): ExploreProgressReadResult {
     const snapshot = this.getSnapshot(input).snapshot;
+    const latestScopedRecord = records.find((record) => matchesScope(record.request.snapshot.userScope, input));
     const qualityScores = snapshot.taskResults
       .map((item) => item.qualityScore)
       .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    const matchedTransferAttempts = transferAttempts.filter((item) => matchesScope(item.userScope, input));
+    const transferScores = matchedTransferAttempts
+      .map((item) => item.rubricScore)
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+    const latestTransfer = matchedTransferAttempts[0];
+    const transferEngineScores = buildTransferEngineScores(matchedTransferAttempts);
 
     return {
       completedNodes: snapshot.completedNodes.length,
       taskResults: snapshot.taskResults.length,
       mediaTasks: snapshot.mediaTasks.length,
+      transferAttempts: matchedTransferAttempts.length,
+      successfulTransferAttempts: matchedTransferAttempts.filter((item) => item.outcome === 'success').length,
+      failedTransferAttempts: matchedTransferAttempts.filter((item) => item.outcome === 'failure').length,
       engines: countEngines(snapshot.completedNodes),
       averageTaskQuality: qualityScores.length > 0
         ? qualityScores.reduce((sum, value) => sum + value, 0) / qualityScores.length
         : 0,
-      latestSyncedAt: records[0]?.syncedAt,
+      averageTransferRubricScore: transferScores.length > 0
+        ? transferScores.reduce((sum, value) => sum + value, 0) / transferScores.length
+        : 0,
+      transferEngineScores,
+      latestTransferOutcome: latestTransfer?.outcome,
+      latestTransferRepairNodeKey: latestTransfer?.recommendedRepairNodeKey,
+      latestSyncedAt: latestScopedRecord?.syncedAt,
     };
   }
 
@@ -129,6 +162,7 @@ export class MemoryExploreSyncStore implements ExploreSyncStore {
           acceptedCompletedNodes: record.acceptedCounts.completedNodes,
           acceptedTaskResults: record.acceptedCounts.taskResults,
           acceptedMediaTasks: record.acceptedCounts.mediaTasks,
+          acceptedTransferAttempts: record.acceptedCounts.transferAttempts,
           createdAt: record.syncedAt,
         };
       });
@@ -165,6 +199,24 @@ export class MemoryExploreSyncStore implements ExploreSyncStore {
       .slice(0, limit)
       .map(({ userScope: _userScope, ...item }) => item);
   }
+
+  saveTransferAttempt(input: ExploreTransferAttemptInput): ExploreTransferAttemptRecord {
+    const record: ExploreTransferAttemptRecord = {
+      ...input,
+      id: `transfer_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+    };
+
+    transferAttempts.unshift(record);
+    return record;
+  }
+
+  listTransferAttempts(input: ExploreTransferAttemptListInput): ExploreTransferAttemptRecord[] {
+    const limit = Math.max(1, Math.min(100, Math.round(input.limit ?? 20)));
+
+    return transferAttempts
+      .filter((item) => matchesScope(item.userScope, input))
+      .slice(0, limit);
+  }
 }
 
 function matchesScope(value: unknown, filter: ExploreScopeFilter) {
@@ -195,4 +247,39 @@ function countEngines(items: Record<string, unknown>[]): ExploreProgressReadResu
   }
 
   return engines;
+}
+
+function buildTransferEngineScores(items: ExploreTransferAttemptRecord[]): ExploreProgressReadResult['transferEngineScores'] {
+  const buckets = {
+    worldEngine: [] as number[],
+    mindEngine: [] as number[],
+    meaningEngine: [] as number[],
+    gameTopologyEngine: [] as number[],
+    unknown: [] as number[],
+  };
+
+  for (const item of items) {
+    const bucket = engineBucket(item.extractedStructure.engineKey);
+    buckets[bucket].push(item.outcome === 'success' ? item.rubricScore : 0);
+  }
+
+  return {
+    worldEngine: average(buckets.worldEngine),
+    mindEngine: average(buckets.mindEngine),
+    meaningEngine: average(buckets.meaningEngine),
+    gameTopologyEngine: average(buckets.gameTopologyEngine),
+    unknown: average(buckets.unknown),
+  };
+}
+
+function engineBucket(engineKey: unknown): keyof ExploreProgressReadResult['engines'] {
+  if (engineKey === 'world-engine') return 'worldEngine';
+  if (engineKey === 'mind-engine') return 'mindEngine';
+  if (engineKey === 'meaning-engine') return 'meaningEngine';
+  if (engineKey === 'game-topology-engine') return 'gameTopologyEngine';
+  return 'unknown';
+}
+
+function average(values: number[]) {
+  return values.length > 0 ? values.reduce((sum, value) => sum + value, 0) / values.length : 0;
 }

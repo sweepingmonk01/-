@@ -77,6 +77,7 @@ function buildValidRequest() {
           updatedAt: '2026-01-01T00:00:00.000Z',
         },
       ],
+      transferAttempts: [],
       exportedAt: '2026-01-01T00:00:00.000Z',
       schemaVersion: 'explore-remote-v0.1',
     },
@@ -114,11 +115,13 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
         completedNodes: unknown[];
         taskResults: unknown[];
         mediaTasks: unknown[];
+        transferAttempts: unknown[];
       };
       counts: {
         completedNodes: number;
         taskResults: number;
         mediaTasks: number;
+        transferAttempts: number;
       };
     };
 
@@ -127,10 +130,12 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
       completedNodes: 0,
       taskResults: 0,
       mediaTasks: 0,
+      transferAttempts: 0,
     });
     assert.deepEqual(payload.snapshot.completedNodes, []);
     assert.deepEqual(payload.snapshot.taskResults, []);
     assert.deepEqual(payload.snapshot.mediaTasks, []);
+    assert.deepEqual(payload.snapshot.transferAttempts, []);
   });
 
   await t.test('returns a seed learning profile before data exists', async () => {
@@ -152,6 +157,7 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
         completedNodes: number;
         taskResults: number;
         mediaTasks: number;
+        transferAttempts: number;
       };
       generatedAt?: string;
     };
@@ -167,6 +173,7 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
     assert.equal(payload.progress.completedNodes, 0);
     assert.equal(payload.progress.taskResults, 0);
     assert.equal(payload.progress.mediaTasks, 0);
+    assert.equal(payload.progress.transferAttempts, 0);
     assert.ok(payload.generatedAt);
     assert.equal(store.countRows('explore_learning_profile_snapshots'), 0);
   });
@@ -189,6 +196,7 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
     request.snapshot.completedNodes = [];
     request.snapshot.taskResults = [];
     request.snapshot.mediaTasks = [];
+    request.snapshot.transferAttempts = [];
 
     const response = await fetch(`${baseUrl}/api/explore/sync`, {
       method: 'POST',
@@ -225,6 +233,7 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
         completedNodes: number;
         taskResults: number;
         mediaTasks: number;
+        transferAttempts: number;
       };
       message?: string;
     };
@@ -235,6 +244,7 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
       completedNodes: 1,
       taskResults: 1,
       mediaTasks: 1,
+      transferAttempts: 0,
     });
     assert.equal(payload.message, 'Synced 3 explore records.');
     assert.equal(store.countRows('explore_sync_batches'), 1);
@@ -254,11 +264,13 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
         completedNodes: Array<{ id: string; syncStatus: string }>;
         taskResults: Array<{ id: string; syncStatus: string; qualityScore: number }>;
         mediaTasks: Array<{ id: string; syncStatus: string; type: string }>;
+        transferAttempts: unknown[];
       };
       counts: {
         completedNodes: number;
         taskResults: number;
         mediaTasks: number;
+        transferAttempts: number;
       };
     };
 
@@ -267,6 +279,7 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
       completedNodes: 1,
       taskResults: 1,
       mediaTasks: 1,
+      transferAttempts: 0,
     });
     assert.equal(payload.snapshot.completedNodes[0]?.id, 'completed-node-a');
     assert.equal(payload.snapshot.completedNodes[0]?.syncStatus, 'synced');
@@ -274,6 +287,7 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
     assert.equal(payload.snapshot.taskResults[0]?.qualityScore, 0.82);
     assert.equal(payload.snapshot.mediaTasks[0]?.id, 'media-task-a');
     assert.equal(payload.snapshot.mediaTasks[0]?.type, 'gpt-image');
+    assert.deepEqual(payload.snapshot.transferAttempts, []);
   });
 
   await t.test('aggregates progress by count, engine, quality, and latest sync time', async () => {
@@ -286,6 +300,9 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
         completedNodes: number;
         taskResults: number;
         mediaTasks: number;
+        transferAttempts: number;
+        successfulTransferAttempts: number;
+        failedTransferAttempts: number;
         engines: {
           worldEngine: number;
           mindEngine: number;
@@ -294,6 +311,14 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
           unknown: number;
         };
         averageTaskQuality: number;
+        averageTransferRubricScore: number;
+        transferEngineScores: {
+          worldEngine: number;
+          mindEngine: number;
+          meaningEngine: number;
+          gameTopologyEngine: number;
+          unknown: number;
+        };
         latestSyncedAt?: string;
       };
     };
@@ -302,6 +327,9 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
     assert.equal(payload.progress.completedNodes, 1);
     assert.equal(payload.progress.taskResults, 1);
     assert.equal(payload.progress.mediaTasks, 1);
+    assert.equal(payload.progress.transferAttempts, 0);
+    assert.equal(payload.progress.successfulTransferAttempts, 0);
+    assert.equal(payload.progress.failedTransferAttempts, 0);
     assert.deepEqual(payload.progress.engines, {
       worldEngine: 0,
       mindEngine: 0,
@@ -310,6 +338,14 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
       unknown: 1,
     });
     assert.equal(payload.progress.averageTaskQuality, 0.82);
+    assert.equal(payload.progress.averageTransferRubricScore, 0);
+    assert.deepEqual(payload.progress.transferEngineScores, {
+      worldEngine: 0,
+      mindEngine: 0,
+      meaningEngine: 0,
+      gameTopologyEngine: 0,
+      unknown: 0,
+    });
     assert.ok(payload.progress.latestSyncedAt);
   });
 
@@ -350,6 +386,132 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
     assert.equal(payload.progress.averageTaskQuality, 0.82);
     assert.ok(payload.generatedAt);
     assert.equal(store.countRows('explore_learning_profile_snapshots'), 0);
+  });
+
+  await t.test('records a successful structure transfer and lifts the matching profile dimension', async () => {
+    const response = await fetch(`${baseUrl}/api/explore/transfer-attempts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        userScope: {
+          userId: 'local-user',
+          studentId: 'local-student',
+        },
+        sourceNodeKey: 'language.context',
+        sourceEvidenceId: 'task-result-a',
+        targetDomain: '社交沟通',
+        userApplication: '我识别到语境判断结构，并把原题线索迁移到社交沟通：先看上下文和对方等待很久这个条件，再对应到真实意思，执行动作是道歉并重新约定时间，因为这样能验证我没有只复述原知识。',
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json() as {
+      ok: boolean;
+      transferAttempt: {
+        outcome: 'success' | 'failure';
+        rubricScore: number;
+        extractedStructure: {
+          key: string;
+          engineKey: string;
+        };
+      };
+      profileBefore: {
+        meaningModelIndex: number;
+        activeStructuralIntelligence: number;
+      };
+      profileAfter: {
+        meaningModelIndex: number;
+        activeStructuralIntelligence: number;
+        stage: string;
+      };
+      progressAfter: {
+        transferAttempts: number;
+        successfulTransferAttempts: number;
+        averageTransferRubricScore: number;
+        transferEngineScores: {
+          meaningEngine: number;
+        };
+      };
+    };
+
+    assert.equal(payload.ok, true);
+    assert.equal(payload.transferAttempt.outcome, 'success');
+    assert.equal(payload.transferAttempt.rubricScore, 1);
+    assert.equal(payload.transferAttempt.extractedStructure.key, 'context-judgement');
+    assert.equal(payload.transferAttempt.extractedStructure.engineKey, 'meaning-engine');
+    assert.ok(payload.profileAfter.meaningModelIndex > payload.profileBefore.meaningModelIndex);
+    assert.ok(payload.profileAfter.activeStructuralIntelligence > payload.profileBefore.activeStructuralIntelligence);
+    assert.equal(payload.profileAfter.stage, 'integrating');
+    assert.equal(payload.progressAfter.transferAttempts, 1);
+    assert.equal(payload.progressAfter.successfulTransferAttempts, 1);
+    assert.equal(payload.progressAfter.averageTransferRubricScore, 1);
+    assert.equal(payload.progressAfter.transferEngineScores.meaningEngine, 1);
+    assert.equal(store.countRows('explore_transfer_attempts'), 1);
+  });
+
+  await t.test('records a failed structure transfer and returns the next repair node in profile', async () => {
+    const response = await fetch(`${baseUrl}/api/explore/transfer-attempts`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        userScope: {
+          userId: 'local-user',
+          studentId: 'local-student',
+        },
+        sourceNodeKey: 'physics.symmetry_conservation',
+        sourceEvidenceId: 'completed-node-a',
+        targetDomain: '生活规划',
+        userApplication: '我不会，照原来的题背一遍。',
+      }),
+    });
+
+    assert.equal(response.status, 200);
+    const payload = await response.json() as {
+      ok: boolean;
+      transferAttempt: {
+        outcome: 'success' | 'failure';
+        rubricScore: number;
+        recommendedRepairNodeKey?: string;
+        rubric: {
+          structureIdentified: boolean;
+          mappingApplied: boolean;
+          actionMechanismNamed: boolean;
+          resultExplained: boolean;
+        };
+      };
+      profileAfter: {
+        recommendedNodeKey?: string;
+      };
+      progressAfter: {
+        transferAttempts: number;
+        successfulTransferAttempts: number;
+        failedTransferAttempts: number;
+        latestTransferOutcome?: string;
+        latestTransferRepairNodeKey?: string;
+      };
+    };
+
+    assert.equal(payload.ok, true);
+    assert.equal(payload.transferAttempt.outcome, 'failure');
+    assert.equal(payload.transferAttempt.rubricScore, 0);
+    assert.deepEqual(payload.transferAttempt.rubric, {
+      structureIdentified: false,
+      mappingApplied: false,
+      actionMechanismNamed: false,
+      resultExplained: false,
+    });
+    assert.equal(payload.transferAttempt.recommendedRepairNodeKey, 'physics.symmetry_conservation');
+    assert.equal(payload.profileAfter.recommendedNodeKey, 'physics.symmetry_conservation');
+    assert.equal(payload.progressAfter.transferAttempts, 2);
+    assert.equal(payload.progressAfter.successfulTransferAttempts, 1);
+    assert.equal(payload.progressAfter.failedTransferAttempts, 1);
+    assert.equal(payload.progressAfter.latestTransferOutcome, 'failure');
+    assert.equal(payload.progressAfter.latestTransferRepairNodeKey, 'physics.symmetry_conservation');
+    assert.equal(store.countRows('explore_transfer_attempts'), 2);
   });
 
   await t.test('saves a learning profile snapshot only through the explicit snapshot endpoint', async () => {
@@ -456,6 +618,7 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
         acceptedCompletedNodes: number;
         acceptedTaskResults: number;
         acceptedMediaTasks: number;
+        acceptedTransferAttempts: number;
         createdAt: string;
       }>;
     };
@@ -467,6 +630,7 @@ test('Explore sync API rejects empty snapshots and persists valid snapshots', as
     assert.equal(payload.batches[0]?.acceptedCompletedNodes, 1);
     assert.equal(payload.batches[0]?.acceptedTaskResults, 1);
     assert.equal(payload.batches[0]?.acceptedMediaTasks, 1);
+    assert.equal(payload.batches[0]?.acceptedTransferAttempts, 0);
     assert.ok(payload.batches[0]?.createdAt);
   });
 });

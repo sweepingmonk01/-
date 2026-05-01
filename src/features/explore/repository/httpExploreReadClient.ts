@@ -1,7 +1,10 @@
 import type {
+  CreateExploreTransferAttemptApiResponse,
+  CreateExploreTransferAttemptRequest,
   ExploreProgressApiResponse,
   ExploreSnapshotApiResponse,
   ExploreSyncBatchesApiResponse,
+  ExploreTransferAttemptsApiResponse,
 } from './exploreRemoteReadTypes';
 import type {
   ExploreProfileApiResponse,
@@ -28,6 +31,13 @@ export interface ExploreRemoteReadClient {
     scope?: ExploreRemoteReadScope,
     input?: { limit?: number },
   ): Promise<ExploreProfileHistoryApiResponse>;
+  createTransferAttempt(
+    input: CreateExploreTransferAttemptRequest,
+  ): Promise<CreateExploreTransferAttemptApiResponse>;
+  getTransferAttempts(
+    scope?: ExploreRemoteReadScope,
+    input?: { limit?: number },
+  ): Promise<ExploreTransferAttemptsApiResponse>;
   getSyncBatches(input?: { limit?: number }): Promise<ExploreSyncBatchesApiResponse>;
 }
 
@@ -137,6 +147,40 @@ export const httpExploreReadClient: ExploreRemoteReadClient = {
     );
 
     return readJsonResponse<ExploreProfileHistoryApiResponse>(response);
+  },
+
+  async createTransferAttempt(
+    input: CreateExploreTransferAttemptRequest,
+  ): Promise<CreateExploreTransferAttemptApiResponse> {
+    const response = await fetch(`${getExploreApiBase()}/transfer-attempts`, {
+      method: 'POST',
+      headers: await buildMobiusHeaders({
+        'Content-Type': 'application/json',
+      }),
+      body: JSON.stringify({
+        ...input,
+        userScope: scopeToAuthenticatedStudent(input.userScope),
+      }),
+    });
+
+    return readJsonResponse<CreateExploreTransferAttemptApiResponse>(response);
+  },
+
+  async getTransferAttempts(
+    scope: ExploreRemoteReadScope = {},
+    input?: { limit?: number },
+  ): Promise<ExploreTransferAttemptsApiResponse> {
+    const response = await fetch(
+      `${getExploreApiBase()}/transfer-attempts${buildQuery({
+        ...scopeToAuthenticatedStudent(scope),
+        limit: input?.limit ? String(input.limit) : undefined,
+      })}`,
+      {
+        headers: await buildMobiusHeaders(),
+      },
+    );
+
+    return readJsonResponse<ExploreTransferAttemptsApiResponse>(response);
   },
 
   async getSyncBatches(input?: {

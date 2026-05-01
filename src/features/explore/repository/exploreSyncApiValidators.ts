@@ -68,10 +68,19 @@ export function validateExploreRemoteSnapshot(
     });
   }
 
+  if (!Array.isArray(snapshot.transferAttempts)) {
+    errors.push({
+      code: 'INVALID_TRANSFER_ATTEMPTS',
+      message: 'transferAttempts must be an array.',
+      path: 'snapshot.transferAttempts',
+    });
+  }
+
   const total =
     (snapshot.completedNodes?.length ?? 0) +
     (snapshot.taskResults?.length ?? 0) +
-    (snapshot.mediaTasks?.length ?? 0);
+    (snapshot.mediaTasks?.length ?? 0) +
+    (snapshot.transferAttempts?.length ?? 0);
 
   if (total === 0) {
     errors.push({

@@ -22,6 +22,7 @@ export function buildExploreSyncSuccessResponseFixture(input?: {
   completedNodes?: number;
   taskResults?: number;
   mediaTasks?: number;
+  transferAttempts?: number;
 }): ExploreSyncApiResponse {
   return {
     ok: true,
@@ -31,6 +32,7 @@ export function buildExploreSyncSuccessResponseFixture(input?: {
       completedNodes: input?.completedNodes ?? 0,
       taskResults: input?.taskResults ?? 0,
       mediaTasks: input?.mediaTasks ?? 0,
+      transferAttempts: input?.transferAttempts ?? 0,
     },
     message: 'Fixture sync success.',
   };

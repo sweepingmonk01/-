@@ -10,6 +10,19 @@ export interface ExploreLearningProfileInput {
     unknown: number;
   };
   averageTaskQuality: number;
+  transferAttempts?: number;
+  successfulTransferAttempts?: number;
+  failedTransferAttempts?: number;
+  averageTransferRubricScore?: number;
+  latestTransferOutcome?: 'success' | 'failure';
+  latestTransferRepairNodeKey?: string;
+  transferEngineScores?: {
+    worldEngine: number;
+    mindEngine: number;
+    meaningEngine: number;
+    gameTopologyEngine: number;
+    unknown: number;
+  };
   latestSyncedAt?: string;
 }
 

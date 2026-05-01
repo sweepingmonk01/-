@@ -5,6 +5,7 @@ import { buildExploreLearningProfile } from '../profile/buildExploreLearningProf
 import type { ExploreLearningProfile } from '../profile/exploreLearningProfileTypes';
 import { getDefaultExploreReadClient } from '../repository/exploreReadClientFactory';
 import type { ExploreRemoteReadScope } from '../repository/httpExploreReadClient';
+import type { ExploreProgressApiResponse } from '../repository/exploreRemoteReadTypes';
 
 type Props = {
   onOpenNode?: (engineKey: ExploreEngineKey, nodeKey: string) => void;
@@ -49,6 +50,8 @@ function percent(value: number) {
 
 export function ExploreLearningProfilePanel({ onOpenNode }: Props) {
   const [profile, setProfile] = useState<ExploreLearningProfile | null>(null);
+  const [progress, setProgress] =
+    useState<ExploreProgressApiResponse['progress'] | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState('');
@@ -67,6 +70,7 @@ export function ExploreLearningProfilePanel({ onOpenNode }: Props) {
       }
 
       setProfile(profileResponse.profile);
+      setProgress(profileResponse.progress);
       setMessage('长期学习画像已生成。');
     } catch (error) {
       try {
@@ -80,6 +84,7 @@ export function ExploreLearningProfilePanel({ onOpenNode }: Props) {
 
         const nextProfile = buildExploreLearningProfile(progress.progress);
         setProfile(nextProfile);
+        setProgress(progress.progress);
         setMessage('后端画像不可用，已回退到前端本地计算。');
       } catch (fallbackError) {
         setMessage(
@@ -118,6 +123,7 @@ export function ExploreLearningProfilePanel({ onOpenNode }: Props) {
       }
 
       setProfile(response.profile);
+      setProgress(response.progress);
       setMessage(response.message || '御风快照已保存。');
     } catch (error) {
       setMessage(error instanceof Error ? error.message : '御风快照保存失败。');
@@ -172,6 +178,21 @@ export function ExploreLearningProfilePanel({ onOpenNode }: Props) {
             <p className="mt-2 text-xs font-bold leading-5 text-white/62">
               {profile.profileSummary}
             </p>
+            <div className="mt-3 rounded-2xl border border-white/10 bg-black/14 px-3 py-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-[10px] font-black uppercase tracking-[0.12em] text-white/36">Transfer</span>
+                <span className="text-[10px] font-black uppercase text-white/44">
+                  {progress?.latestTransferOutcome ?? 'none'}
+                </span>
+              </div>
+              <p className="mt-1 text-xs font-bold leading-5 text-white/60">
+                {progress?.latestTransferOutcome === 'success'
+                  ? `成功迁移 ${progress.successfulTransferAttempts}/${progress.transferAttempts}`
+                  : progress?.latestTransferOutcome === 'failure'
+                    ? `失败迁移，下一步修复 ${progress.latestTransferRepairNodeKey ?? 'pending'}`
+                    : '暂无结构迁移验证。'}
+              </p>
+            </div>
           </div>
 
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">

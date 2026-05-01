@@ -242,6 +242,12 @@ export default function ExploreCockpitView({
   }, []);
 
   const profile = profileResponse?.profile;
+  const progress = profileResponse?.progress;
+  const latestTransferText = progress?.latestTransferOutcome
+    ? progress.latestTransferOutcome === 'success'
+      ? `最近迁移成功 · ${progress.successfulTransferAttempts}/${progress.transferAttempts}`
+      : `最近迁移失败 · repair=${progress.latestTransferRepairNodeKey ?? 'pending'}`
+    : '暂无迁移验证';
   const freedomBudget = profile
     ? buildFreedomTimeBudget({
         activeStructuralIntelligence: profile.activeStructuralIntelligence,
@@ -364,6 +370,27 @@ export default function ExploreCockpitView({
                       <Compass size={30} className="mb-1 text-fuchsia-100/55" />
                     </div>
                     <p className="mt-3 text-xs font-bold leading-5 text-white/64">{profile.profileSummary}</p>
+                    <div className="mt-3 rounded-2xl border border-white/10 bg-black/18 px-3 py-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-[10px] font-black uppercase tracking-[0.14em] text-white/42">结构迁移验证</p>
+                        <span className="text-[10px] font-black uppercase text-white/48">
+                          {progress?.latestTransferOutcome ?? 'none'}
+                        </span>
+                      </div>
+                      <p className="mt-1 text-xs font-bold leading-5 text-white/68">{latestTransferText}</p>
+                      {progress?.latestTransferRepairNodeKey ? (
+                        <button
+                          type="button"
+                          onClick={() => handleOpenNodeKey(
+                            progress.latestTransferRepairNodeKey,
+                            '迁移修复节点暂未出现在探索地图中。',
+                          )}
+                          className="mt-2 inline-flex min-h-10 w-full items-center justify-center rounded-2xl border border-cyan-200/20 bg-cyan-300/10 px-3 py-2 text-xs font-black text-cyan-50 transition active:scale-[0.99]"
+                        >
+                          进入迁移修复节点
+                        </button>
+                      ) : null}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2">

@@ -44,6 +44,7 @@ function scopeSnapshotToAuthenticatedStudent(
     completedNodes: snapshot.completedNodes.map(scopeItem),
     taskResults: snapshot.taskResults.map(scopeItem),
     mediaTasks: snapshot.mediaTasks.map(scopeItem),
+    transferAttempts: snapshot.transferAttempts.map(scopeItem),
   };
 }
 
@@ -115,7 +116,7 @@ export const httpExploreSyncClient: ExploreSyncClient = {
       remoteBatchId: data.remoteBatchId,
       message:
         data.message ||
-        `Synced completedNodes=${data.acceptedCounts?.completedNodes ?? 0}, taskResults=${data.acceptedCounts?.taskResults ?? 0}, mediaTasks=${data.acceptedCounts?.mediaTasks ?? 0}`,
+        `Synced completedNodes=${data.acceptedCounts?.completedNodes ?? 0}, taskResults=${data.acceptedCounts?.taskResults ?? 0}, mediaTasks=${data.acceptedCounts?.mediaTasks ?? 0}, transferAttempts=${data.acceptedCounts?.transferAttempts ?? 0}`,
       syncedAt: data.syncedAt,
     };
   },

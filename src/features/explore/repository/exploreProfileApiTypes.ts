@@ -34,7 +34,7 @@ export interface ExploreProfileHistoryApiResponse {
 export interface SaveExploreProfileSnapshotApiResponse {
   ok: boolean;
   profile: ExploreLearningProfile;
-  progress: unknown;
+  progress: ExploreProgressApiResponse['progress'];
   generatedAt: string;
   snapshotSaved: boolean;
   message?: string;

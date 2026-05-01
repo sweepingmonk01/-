@@ -50,6 +50,7 @@ const buildExploreSyncRequest = () => ({
     ],
     taskResults: [],
     mediaTasks: [],
+    transferAttempts: [],
     exportedAt: '2026-01-01T00:00:00.000Z',
     schemaVersion: 'explore-remote-v0.1',
   },

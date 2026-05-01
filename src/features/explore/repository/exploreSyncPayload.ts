@@ -35,6 +35,7 @@ export function buildExploreRemoteSnapshot(
     mediaTasks: input.mediaTasks.map((task) =>
       mapMediaTaskToRemote(task, input.userScope),
     ),
+    transferAttempts: [],
     exportedAt: new Date().toISOString(),
     schemaVersion: 'explore-remote-v0.1',
   };
