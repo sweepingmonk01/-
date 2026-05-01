@@ -44,6 +44,7 @@ const shouldCommitPatterns = [
   'src/',
   'scripts/check-bundle-budget.mjs',
   'scripts/check-worktree-boundary.mjs',
+  'scripts/smoke-local.mjs',
   'app/assets/branding/',
   'app/assets/foundation-science/',
   'app/assets/visual-language/',

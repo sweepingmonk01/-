@@ -11,6 +11,7 @@
     "check:worktree": "node scripts/check-worktree-boundary.mjs",
     "check:worktree:strict": "node scripts/check-worktree-boundary.mjs --strict",
     "check:worktree:verbose": "node scripts/check-worktree-boundary.mjs --verbose",
+    "smoke:local": "node scripts/smoke-local.mjs",
     "preview": "vite preview",
     "clean": "rm -rf dist",
     "lint": "tsc --noEmit",

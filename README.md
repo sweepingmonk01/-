@@ -37,8 +37,11 @@ npm run test:client
 npm run test:server
 npm run build
 npm run check:bundle
+npm run smoke:local
 npm run check:worktree
 ```
+
+Use `npm run smoke:local` before handing a branch to QA. It starts the unified server on a temporary local port and verifies readiness, frontend shell rendering, auth rejection, demo dashboard stats, Explore progress, and learning-cycle readback.
 
 ## Current API Boundaries
 
