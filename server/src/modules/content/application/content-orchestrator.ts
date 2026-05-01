@@ -7,10 +7,19 @@ import type {
   KnowledgePoint,
   QuestionMatch,
 } from '../domain/types.js';
+import type { KnowledgeGraphDecisionContext } from '../../ai/domain/types.js';
 import type { DiagnosedMistakePattern, KnowledgeAction, MistakeCategory } from '../../learning/domain/protocol.js';
 
 interface ContentOrchestratorDeps {
   catalog: ContentCatalog;
+  graphContextProvider?: {
+    getDecisionContext(input: {
+      studentId: string;
+      painPoint?: string;
+      rule?: string;
+      questionText?: string;
+    }): Promise<KnowledgeGraphDecisionContext>;
+  };
 }
 
 const normalize = (value: string) => value.toLowerCase();
@@ -39,14 +48,27 @@ export class ContentOrchestrator {
   }
 
   async resolveErrorContext(input: ErrorToContentInput): Promise<ErrorToContentResolution> {
-    const [knowledgePoints, examQuestions, foundationNodes, foundationEdges] = await Promise.all([
+    const [knowledgePoints, examQuestions, foundationNodes, foundationEdges, graphDecisionContext] = await Promise.all([
       this.deps.catalog.listKnowledgePoints(),
       this.deps.catalog.listExamQuestions(),
       this.deps.catalog.listFoundationKnowledgeNodes(),
       this.deps.catalog.listFoundationKnowledgeEdges(),
+      input.studentId && this.deps.graphContextProvider
+        ? this.deps.graphContextProvider.getDecisionContext({
+            studentId: input.studentId,
+            painPoint: input.painPoint,
+            rule: input.rule,
+            questionText: input.questionText,
+          })
+        : Promise.resolve(undefined),
     ]);
 
     const corpus = normalize([input.painPoint, input.rule, input.questionText].filter(Boolean).join(' '));
+    const graphFocusLabels = [
+      ...(graphDecisionContext?.matchedHotspots ?? []),
+      ...(graphDecisionContext?.neighborRecommendations ?? []),
+      ...(graphDecisionContext?.topHotspots ?? []),
+    ].map((node) => node.label);
     const matchedKnowledgePoints = knowledgePoints
       .filter((item) => !input.subject || item.reference.subject === input.subject)
       .filter((item) => !input.grade || item.reference.grade === input.grade)
@@ -73,6 +95,12 @@ export class ContentOrchestrator {
           reasons.push(`痛点直接贴合知识点标题: ${knowledgePoint.title}`);
         }
 
+        const graphHits = graphFocusLabels.filter((label) => this.matchesKnowledgePointGraphSignal(knowledgePoint, label));
+        if (graphHits.length) {
+          score += graphHits.length * 5;
+          reasons.push(`图谱热点/邻接命中: ${graphHits.slice(0, 2).join(', ')}`);
+        }
+
         return {
           knowledgePoint,
           score,
@@ -90,7 +118,8 @@ export class ContentOrchestrator {
       .map<QuestionMatch | null>((question) => {
         const overlapKnowledgePointIds = question.knowledgePointIds.filter((id) => matchedIds.has(id));
         const matchedTags = question.tags.filter((tag) => corpus.includes(normalize(tag)));
-        if (!overlapKnowledgePointIds.length && !matchedTags.length) {
+        const graphHits = graphFocusLabels.filter((label) => this.matchesQuestionGraphSignal(question, label));
+        if (!overlapKnowledgePointIds.length && !matchedTags.length && !graphHits.length) {
           return null;
         }
 
@@ -101,6 +130,9 @@ export class ContentOrchestrator {
         if (matchedTags.length) {
           rationaleParts.push(`题目标签命中 ${matchedTags.join(', ')}`);
         }
+        if (graphHits.length) {
+          rationaleParts.push(`图谱相邻建议 ${graphHits.slice(0, 2).join(', ')}`);
+        }
 
         return {
           question,
@@ -109,7 +141,11 @@ export class ContentOrchestrator {
         };
       })
       .filter((item): item is QuestionMatch => Boolean(item))
-      .sort((a, b) => b.overlapKnowledgePointIds.length - a.overlapKnowledgePointIds.length || b.question.year - a.question.year)
+      .sort((a, b) => {
+        const scoreDiff = this.scoreQuestionGraphSignal(b, graphFocusLabels) - this.scoreQuestionGraphSignal(a, graphFocusLabels);
+        if (scoreDiff !== 0) return scoreDiff;
+        return b.overlapKnowledgePointIds.length - a.overlapKnowledgePointIds.length || b.question.year - a.question.year;
+      })
       .slice(0, 5);
 
     const topKnowledgePoint = matchedKnowledgePoints[0]?.knowledgePoint;
@@ -124,6 +160,7 @@ export class ContentOrchestrator {
       topKnowledgePoint,
     });
     const evidence = [
+      ...(graphDecisionContext?.summary ?? []).slice(0, 2).map((item) => `图谱: ${item}`),
       ...matchedKnowledgePoints.flatMap((item) => item.reasons.slice(0, 2)),
       ...recommendedFoundationNodes.slice(0, 1).flatMap((item) => item.reasons.slice(0, 2).map((reason) => `基础科学: ${reason}`)),
       ...relatedQuestions.slice(0, 2).map((item) => `相似真题: ${item.question.year} ${item.question.region} ${item.question.questionType}`),
@@ -143,6 +180,7 @@ export class ContentOrchestrator {
       matchedKnowledgePoints,
       recommendedFoundationNodes,
       relatedQuestions,
+      graphDecisionContext,
       recommendedStorySeed: {
         painPoint: input.painPoint,
         rule: input.rule ?? topKnowledgePoint?.masteryGoal ?? '围绕命中的知识点给出更窄一步的操作规则。',
@@ -153,6 +191,28 @@ export class ContentOrchestrator {
         knowledgeAction,
       },
     };
+  }
+
+  private matchesKnowledgePointGraphSignal(knowledgePoint: KnowledgePoint, label: string) {
+    const normalizedLabel = normalize(label);
+    return [knowledgePoint.title, ...knowledgePoint.keywords, ...knowledgePoint.commonMistakes]
+      .some((item) => {
+        const normalizedItem = normalize(item);
+        return normalizedItem.includes(normalizedLabel) || normalizedLabel.includes(normalizedItem);
+      });
+  }
+
+  private matchesQuestionGraphSignal(question: QuestionMatch['question'], label: string) {
+    const normalizedLabel = normalize(label);
+    return [question.stem, ...question.tags]
+      .some((item) => {
+        const normalizedItem = normalize(item);
+        return normalizedItem.includes(normalizedLabel) || normalizedLabel.includes(normalizedItem);
+      });
+  }
+
+  private scoreQuestionGraphSignal(question: QuestionMatch, labels: string[]) {
+    return labels.reduce((score, label) => score + (this.matchesQuestionGraphSignal(question.question, label) ? 1 : 0), 0);
   }
 
   private buildFoundationRecommendations(input: {

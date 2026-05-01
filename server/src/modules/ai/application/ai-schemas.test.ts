@@ -38,11 +38,13 @@ test('dehydrateHomeworkRequestSchema normalizes strategic context defaults', () 
     targetScore: 114.6,
     strategicContext: {
       recentPainPoints: [' 几何辅助线 ', '几何辅助线', ' 英语时态 '],
+      graphHotspots: [' 几何辅助线 图谱热点 4x ', '几何辅助线 图谱热点 4x'],
     },
   });
 
   assert.equal(parsed.mimeType, 'image/png');
   assert.equal(parsed.targetScore, 115);
   assert.deepEqual(parsed.strategicContext?.recentPainPoints, ['几何辅助线', '英语时态']);
+  assert.deepEqual(parsed.strategicContext?.graphHotspots, ['几何辅助线 图谱热点 4x']);
   assert.equal(parsed.strategicContext?.interactionFailureCount, 0);
 });

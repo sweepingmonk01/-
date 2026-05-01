@@ -1,3 +1,4 @@
+import type { KnowledgeGraphDecisionContext } from '../../ai/domain/types.js';
 import type { DiagnosedMistakePattern, ErrorRecord, KnowledgeAction } from '../../learning/domain/protocol.js';
 
 export type SubjectCode = 'zh' | 'ma' | 'en';
@@ -138,5 +139,6 @@ export interface ErrorToContentResolution {
   matchedKnowledgePoints: ContentMatch[];
   recommendedFoundationNodes: FoundationKnowledgeMatch[];
   relatedQuestions: QuestionMatch[];
+  graphDecisionContext?: KnowledgeGraphDecisionContext;
   recommendedStorySeed: MobiusStorySeed;
 }

@@ -79,6 +79,8 @@ export const strategicContextSchema = z.object({
   activeRules: z.array(z.string()).optional().default([]).transform((items) => normalizeStringList(items, 240, 12)),
   activeErrorSummaries: z.array(z.string()).optional().default([]).transform((items) => normalizeStringList(items, 320, 12)),
   weakTopicAlerts: z.array(z.string()).optional().default([]).transform((items) => normalizeStringList(items, 240, 12)),
+  graphHotspots: z.array(z.string()).optional().default([]).transform((items) => normalizeStringList(items, 240, 8)),
+  graphNeighborSignals: z.array(z.string()).optional().default([]).transform((items) => normalizeStringList(items, 240, 8)),
   interactionFailureCount: z.number().optional().default(0).transform((value) => Math.max(0, Math.round(value))),
   interactionSuccessCount: z.number().optional().default(0).transform((value) => Math.max(0, Math.round(value))),
 });

@@ -271,6 +271,22 @@ export interface KnowledgeGraphSnapshot {
   updatedAt?: string;
 }
 
+export interface KnowledgeGraphDecisionNode {
+  key: string;
+  label: string;
+  weight: number;
+  relationWeight?: number;
+  anchorKey?: string;
+  anchorLabel?: string;
+}
+
+export interface KnowledgeGraphDecisionContext {
+  topHotspots: KnowledgeGraphDecisionNode[];
+  matchedHotspots: KnowledgeGraphDecisionNode[];
+  neighborRecommendations: KnowledgeGraphDecisionNode[];
+  summary: string[];
+}
+
 export interface GeneratedKnowledgeMapAsset {
   id: string;
   studentId: string;
@@ -330,6 +346,7 @@ export interface MobiusContentResolveResponse {
     reasons: string[];
     edges: FoundationKnowledgeEdge[];
   }>;
+  graphDecisionContext?: KnowledgeGraphDecisionContext;
   relatedQuestions: Array<{
     question: {
       id: string;

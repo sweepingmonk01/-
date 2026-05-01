@@ -82,6 +82,8 @@ test('StrategicPlannerService merges model ROI output with ranked weak-topic ale
     coachService: {
       strategicPlanHomework: async (input: any) => {
         capturedTargetScore = input.targetScore;
+        assert.deepEqual(input.strategicContext.graphHotspots, ['几何辅助线 图谱热点 4x']);
+        assert.deepEqual(input.strategicContext.graphNeighborSignals, ['倍长中线 相邻于 几何辅助线，建议连带修复']);
         return {
           total: 12,
           trashEasy: 2,
@@ -104,6 +106,21 @@ test('StrategicPlannerService merges model ROI output with ranked weak-topic ale
     } as any,
     profileRepo,
     stateVectors,
+    graphWeaverService: {
+      getDecisionContext: async () => ({
+        topHotspots: [{ key: 'geom-midpoint', label: '几何辅助线', weight: 4 }],
+        matchedHotspots: [{ key: 'geom-midpoint', label: '几何辅助线', weight: 4 }],
+        neighborRecommendations: [{
+          key: 'geom-extend-midline',
+          label: '倍长中线',
+          weight: 2,
+          relationWeight: 9,
+          anchorKey: 'geom-midpoint',
+          anchorLabel: '几何辅助线',
+        }],
+        summary: ['图谱热点命中：几何辅助线', '相邻修复建议：倍长中线 <- 几何辅助线'],
+      }),
+    } as any,
   });
 
   const result = await service.planHomework({
@@ -116,6 +133,12 @@ test('StrategicPlannerService merges model ROI output with ranked weak-topic ale
   assert.deepEqual(result.strategicPlan?.weakTopicAlerts, [
     '模型识别：审题速度不稳',
     '几何辅助线 历史失败率约 100%',
+    '倍长中线 相邻于 几何辅助线，建议连带修复',
     '英语时态 风险信号 6/100',
+  ]);
+  assert.deepEqual(result.strategicPlan?.focusKnowledgePoints, [
+    '几何辅助线',
+    '英语时态',
+    '倍长中线',
   ]);
 });

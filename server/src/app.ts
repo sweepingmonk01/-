@@ -163,6 +163,7 @@ export const createMobiusApp = () => {
     coachService,
     profileRepo,
     stateVectors: stateVectorService,
+    graphWeaverService,
   }) : null;
   const socraticDiagnosticService = new SocraticDiagnosticService({
     coachService,
@@ -171,6 +172,7 @@ export const createMobiusApp = () => {
     stateVectors: stateVectorService,
     hypothesisEngine: new HypothesisEngine(),
     learningCycles,
+    graphWeaverService,
   });
   const studentProfileController = new StudentProfileController(
     profileRepo,
@@ -183,6 +185,7 @@ export const createMobiusApp = () => {
       catalog: new SQLiteContentCatalog({
         dbFile: path.resolve(env.sqliteDbFile),
       }),
+      graphContextProvider: graphWeaverService,
     }),
     eventLogger,
   );

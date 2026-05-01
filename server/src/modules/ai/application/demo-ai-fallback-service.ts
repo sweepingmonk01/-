@@ -151,10 +151,14 @@ export const createDemoDehydrateHomeworkResult = (input: DehydrateHomeworkInput)
   const focusTopics = dedupe([
     ...(input.strategicContext?.activeRules ?? []),
     ...(input.strategicContext?.recentPainPoints ?? []),
+    ...(input.strategicContext?.graphHotspots ?? []).map((item) => item.split(' 图谱热点 ')[0]!.trim()),
+    ...(input.strategicContext?.graphNeighborSignals ?? []).map((item) => item.split(' 相邻于 ')[0]!.trim()),
     ...FALLBACK_FOCUS_TOPICS,
   ]).slice(0, 4);
   const weakTopicAlerts = dedupe([
     ...(input.strategicContext?.weakTopicAlerts ?? []),
+    ...(input.strategicContext?.graphHotspots ?? []),
+    ...(input.strategicContext?.graphNeighborSignals ?? []),
     ...(input.strategicContext?.recentPainPoints ?? []).map((item) => `${item} 最近反复出现，继续失分风险高。`),
   ]).slice(0, 4);
   const questionPlans = buildQuestionPlans(mustDoLabels, focusTopics, weakTopicAlerts);

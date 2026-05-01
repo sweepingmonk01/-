@@ -42,6 +42,8 @@ export interface DehydrateHomeworkInput {
     activeRules: string[];
     activeErrorSummaries: string[];
     weakTopicAlerts: string[];
+    graphHotspots?: string[];
+    graphNeighborSignals?: string[];
     interactionFailureCount: number;
     interactionSuccessCount: number;
   };
@@ -161,6 +163,7 @@ export interface GenerateSocraticTurnInput {
   messages: SocraticMessage[];
   studentStateVector?: Pick<StudentStateVector, 'version' | 'cognitive' | 'sessionContext' | 'recentPainPoints' | 'activeRules'>;
   hypothesisSummary?: HypothesisSummary;
+  graphDecisionContext?: KnowledgeGraphDecisionContext;
 }
 
 export interface KnowledgeGraphEntityExtractionInput {
@@ -237,4 +240,20 @@ export interface KnowledgeGraphSnapshot {
   nodes: KnowledgeGraphNode[];
   edges: KnowledgeGraphEdge[];
   updatedAt?: string;
+}
+
+export interface KnowledgeGraphDecisionNode {
+  key: string;
+  label: string;
+  weight: number;
+  relationWeight?: number;
+  anchorKey?: string;
+  anchorLabel?: string;
+}
+
+export interface KnowledgeGraphDecisionContext {
+  topHotspots: KnowledgeGraphDecisionNode[];
+  matchedHotspots: KnowledgeGraphDecisionNode[];
+  neighborRecommendations: KnowledgeGraphDecisionNode[];
+  summary: string[];
 }

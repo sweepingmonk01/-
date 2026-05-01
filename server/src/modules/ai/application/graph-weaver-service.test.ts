@@ -93,3 +93,40 @@ test('GraphWeaverService bootstraps an empty graph from active error records', a
   assert.ok(graph.nodes.some((node) => node.label === '几何辅助线'));
   assert.ok(graph.edges.some((edge) => edge.source === '中点' || edge.target === '中点'));
 });
+
+test('GraphWeaverService builds graph decision context from matched hotspots and neighbors', async () => {
+  const tempDir = mkdtempSync(path.join(tmpdir(), 'liezi-graph-context-'));
+  const dbFile = path.join(tempDir, 'mobius.sqlite');
+
+  const service = new GraphWeaverService({
+    coachService: {
+      extractKnowledgeGraphEntities: async () => ({
+        entities: ['几何辅助线', '中点', '倍长中线'],
+      }),
+    } as any,
+    repository: new SQLiteKnowledgeGraphRepository({ dbFile }),
+    agentJobs: new SQLiteAgentJobRepository({ dbFile }),
+  });
+
+  await service.weaveErrorRecord('student-a', {
+    id: 'error-graph-1',
+    studentId: 'student-a',
+    painPoint: '几何辅助线',
+    rule: '见中点先想倍长中线',
+    questionText: '已知中点时如何补辅助线？',
+    options: [],
+    status: 'active',
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+  });
+
+  const context = await service.getDecisionContext({
+    studentId: 'student-a',
+    painPoint: '几何辅助线选择失误',
+    rule: '见中点先想中线',
+  });
+
+  assert.equal(context.matchedHotspots[0]?.label, '几何辅助线');
+  assert.ok(context.neighborRecommendations.some((node) => node.label === '倍长中线'));
+  assert.ok(context.summary.some((line) => line.includes('图谱热点命中')));
+});

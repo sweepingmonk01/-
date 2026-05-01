@@ -227,6 +227,7 @@ export class DeepSeekCoachService {
           content: `The student's pain point is "${input.painPoint}". The rule they should have triggered is "${input.rule ?? 'unknown'}". Known rationale from the previous failure: ${JSON.stringify(input.rationale ?? [])}.
 Current state vector context: ${JSON.stringify(input.studentStateVector ?? null)}.
 Structured hypothesis context: ${JSON.stringify(input.hypothesisSummary ?? null)}.
+Knowledge-graph context: ${JSON.stringify(input.graphDecisionContext ?? null)}.
 Conversation so far: ${JSON.stringify(input.messages)}.
 Prefer the highest-confidence hypothesis and its probe action. Ask a sharp follow-up question that narrows the student's exact cognitive break. If enough evidence has surfaced, ask them to restate the correct first step in one sentence.`,
         },

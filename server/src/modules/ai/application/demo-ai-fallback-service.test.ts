@@ -31,6 +31,8 @@ test('demo dehydrate fallback preserves strategic context and valid counts', () 
         activeRules: ['见中点先想中线'],
         activeErrorSummaries: ['第一步策略选择摇摆'],
         weakTopicAlerts: ['几何辅助线 最近两次都失手'],
+        graphHotspots: ['倍长中线 图谱热点 3x'],
+        graphNeighborSignals: ['全等构造 相邻于 倍长中线，建议连带修复'],
         interactionFailureCount: 2,
         interactionSuccessCount: 0,
       },
@@ -38,6 +40,8 @@ test('demo dehydrate fallback preserves strategic context and valid counts', () 
   );
 
   assert.ok(result.mustDoIndices.includes('Q'));
+  assert.ok((result.strategicPlan?.focusKnowledgePoints ?? []).includes('倍长中线'));
   assert.ok((result.strategicPlan?.focusKnowledgePoints ?? []).includes('见中点先想中线'));
   assert.ok((result.strategicPlan?.weakTopicAlerts ?? []).includes('几何辅助线 最近两次都失手'));
+  assert.ok((result.strategicPlan?.weakTopicAlerts ?? []).includes('全等构造 相邻于 倍长中线，建议连带修复'));
 });

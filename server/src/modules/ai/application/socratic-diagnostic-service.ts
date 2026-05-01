@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type {
   AgentJobRecord,
+  KnowledgeGraphDecisionContext,
   HypothesisSummary,
   SocraticMessage,
   SocraticOpeningTurnJobPayload,
@@ -12,6 +13,7 @@ import { SQLiteSocraticThreadRepository } from '../infrastructure/sqlite-socrati
 import { SQLiteAgentJobRepository } from '../infrastructure/sqlite-agent-job-repository.js';
 import { StateVectorService } from '../../student-state/application/state-vector-service.js';
 import { HypothesisEngine } from './hypothesis-engine.js';
+import { GraphWeaverService } from './graph-weaver-service.js';
 
 interface SocraticDiagnosticServiceDeps {
   coachService: DeepSeekCoachService | null;
@@ -20,6 +22,7 @@ interface SocraticDiagnosticServiceDeps {
   stateVectors: StateVectorService;
   hypothesisEngine: HypothesisEngine;
   learningCycles?: LearningCycleService;
+  graphWeaverService?: GraphWeaverService;
 }
 
 interface CreateFailureThreadInput {
@@ -49,6 +52,7 @@ export class SocraticDiagnosticService {
       input.rule,
       input.rationale,
       diagnosticContext.hypothesisSummary,
+      diagnosticContext.graphDecisionContext,
       false,
     );
 
@@ -141,6 +145,7 @@ export class SocraticDiagnosticService {
       messages: nextMessages,
       hypothesisSummary: diagnosticContext.hypothesisSummary,
       studentStateVector: diagnosticContext.studentStateVector,
+      graphDecisionContext: diagnosticContext.graphDecisionContext,
     });
 
     nextMessages.push({
@@ -210,6 +215,7 @@ export class SocraticDiagnosticService {
     messages: SocraticMessage[];
     studentStateVector?: Awaited<ReturnType<StateVectorService['getCurrentVector']>>;
     hypothesisSummary?: HypothesisSummary;
+    graphDecisionContext?: KnowledgeGraphDecisionContext;
   }): Promise<string> {
     if (!this.deps.coachService) {
       return this.buildFallbackPrompt(
@@ -217,6 +223,7 @@ export class SocraticDiagnosticService {
         input.rule,
         input.rationale,
         input.hypothesisSummary,
+        input.graphDecisionContext,
         input.messages.length > 1,
       );
     }
@@ -229,6 +236,7 @@ export class SocraticDiagnosticService {
         messages: input.messages,
         studentStateVector: input.studentStateVector ?? undefined,
         hypothesisSummary: input.hypothesisSummary,
+        graphDecisionContext: input.graphDecisionContext,
       });
     } catch (error) {
       console.warn('Socratic turn generation failed, falling back to heuristic prompt.', error);
@@ -237,6 +245,7 @@ export class SocraticDiagnosticService {
         input.rule,
         input.rationale,
         input.hypothesisSummary,
+        input.graphDecisionContext,
         input.messages.length > 1,
       );
     }
@@ -252,6 +261,13 @@ export class SocraticDiagnosticService {
     latestStudentReply?: string;
   }) {
     const studentStateVector = await this.deps.stateVectors.getCurrentVector(input.studentId);
+    const graphDecisionContext = this.deps.graphWeaverService
+      ? await this.deps.graphWeaverService.getDecisionContext({
+          studentId: input.studentId,
+          painPoint: input.painPoint,
+          rule: input.rule,
+        })
+      : undefined;
     const initialSummary = input.previousHypothesisSummary ?? this.deps.hypothesisEngine.buildSummary({
       painPoint: input.painPoint,
       rule: input.rule,
@@ -271,6 +287,7 @@ export class SocraticDiagnosticService {
     return {
       studentStateVector,
       hypothesisSummary,
+      graphDecisionContext,
     };
   }
 
@@ -279,17 +296,19 @@ export class SocraticDiagnosticService {
     rule: string | undefined,
     rationale: string[] | undefined,
     hypothesisSummary: HypothesisSummary | undefined,
+    graphDecisionContext: KnowledgeGraphDecisionContext | undefined,
     hasUserReply: boolean,
   ) {
     const selectedHypothesis = hypothesisSummary?.selectedHypothesis;
     const selectedProbe = hypothesisSummary?.selectedProbeAction;
     const selectedIntervention = hypothesisSummary?.selectedIntervention;
+    const graphCue = graphDecisionContext?.summary[0];
 
     if (!hasUserReply) {
-      return `系统警报已触发。当前最高风险猜想是：${selectedHypothesis?.label ?? '规则未触发'}。${selectedIntervention?.prompt ?? selectedProbe?.prompt ?? `告诉我：你是没看到题眼，还是看到了但没有触发“${rule ?? '当前核心规则'}”？`} 只回答最主要的一点。`;
+      return `系统警报已触发。当前最高风险猜想是：${selectedHypothesis?.label ?? '规则未触发'}。${graphCue ? `${graphCue}。` : ''}${selectedIntervention?.prompt ?? selectedProbe?.prompt ?? `告诉我：你是没看到题眼，还是看到了但没有触发“${rule ?? '当前核心规则'}”？`} 只回答最主要的一点。`;
     }
 
     const topRationale = rationale?.[0] ?? selectedHypothesis?.summary ?? '这次动作没有真正命中规则';
-    return `继续往下拆。当前猜想是：“${topRationale}”。${selectedIntervention?.prompt ?? selectedProbe?.prompt ?? '现在请你用一句话回答：如果重来一次，你第一步会先看什么，再做什么？'}`;
+    return `继续往下拆。当前猜想是：“${topRationale}”。${graphCue ? `${graphCue}。` : ''}${selectedIntervention?.prompt ?? selectedProbe?.prompt ?? '现在请你用一句话回答：如果重来一次，你第一步会先看什么，再做什么？'}`;
   }
 }

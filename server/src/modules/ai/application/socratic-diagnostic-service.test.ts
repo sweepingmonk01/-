@@ -35,6 +35,14 @@ test('SocraticDiagnosticService closes after three user turns', async () => {
       updateEngine: new StateUpdateEngine(),
     }),
     hypothesisEngine: new HypothesisEngine(),
+    graphWeaverService: {
+      getDecisionContext: async () => ({
+        topHotspots: [{ key: 'fraction-lcm', label: '最小公倍数', weight: 3 }],
+        matchedHotspots: [{ key: 'fraction-common-denominator', label: '分母不一致', weight: 2 }],
+        neighborRecommendations: [{ key: 'fraction-lcm', label: '最小公倍数', weight: 3, relationWeight: 8, anchorKey: 'fraction-common-denominator', anchorLabel: '分母不一致' }],
+        summary: ['图谱热点命中：分母不一致', '相邻修复建议：最小公倍数 <- 分母不一致'],
+      }),
+    } as any,
   });
 
   const thread = await service.createFailureThread({
@@ -46,6 +54,7 @@ test('SocraticDiagnosticService closes after three user turns', async () => {
   assert.equal(thread.status, 'active');
   assert.equal(thread.messages.length, 1);
   assert.match(thread.messages[0]?.content ?? '', /当前最高风险猜想/);
+  assert.match(thread.messages[0]?.content ?? '', /图谱热点命中/);
   assert.equal(thread.hypothesisSummary?.source, 'heuristic-v1');
   assert.ok(thread.hypothesisSummary?.selectedHypothesis);
 
