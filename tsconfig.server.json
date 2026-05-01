@@ -8,5 +8,11 @@
     "jsx": "preserve",
     "allowImportingTsExtensions": false
   },
-  "include": ["server/**/*.ts"]
+  "include": ["server/**/*.ts"],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "tmp_repo",
+    "app"
+  ]
 }

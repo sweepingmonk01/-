@@ -1,15 +1,13 @@
 import type { Request, Response } from 'express';
+import { resolveStudentScope } from '../../auth/presentation/request-auth.js';
 import { StudentStateSummaryService } from '../application/student-state-summary-service.js';
 
 export class StudentStateController {
   constructor(private readonly summaryService: StudentStateSummaryService) {}
 
   getStateSummary = async (req: Request, res: Response) => {
-    const studentId = req.params.studentId;
-    if (!studentId) {
-      res.status(400).json({ error: 'studentId route parameter is required.' });
-      return;
-    }
+    const studentId = resolveStudentScope(req, res, { source: 'params' });
+    if (!studentId) return;
 
     const summary = await this.summaryService.getStudentStateSummary(studentId);
     if (!summary) {

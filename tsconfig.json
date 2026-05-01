@@ -22,5 +22,20 @@
     },
     "allowImportingTsExtensions": true,
     "noEmit": true
-  }
+  },
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "vite.config.ts",
+    "firebase-applet-config.json"
+  ],
+  "exclude": [
+    "dist",
+    "node_modules",
+    "server",
+    "tmp_repo",
+    "app",
+    "universal_server.ts",
+    "sync_architecture.ts"
+  ]
 }

@@ -1,6 +1,19 @@
+import type { KnowledgeGraphDecisionContext } from '../../ai/domain/types.js';
 import type { DiagnosedMistakePattern, ErrorRecord, KnowledgeAction } from '../../learning/domain/protocol.js';
 
 export type SubjectCode = 'zh' | 'ma' | 'en';
+export type FoundationScienceDomain = 'physics' | 'neuroscience';
+export type KnowledgeDomainLayer = 'curriculum' | 'foundation-science' | 'meta-cognition' | 'application';
+export type FoundationKnowledgeScale = 'global' | 'module' | 'concept' | 'mechanism' | 'task';
+export type KnowledgeEdgeKind =
+  | 'prerequisite'
+  | 'explains'
+  | 'analogy'
+  | 'contrasts'
+  | 'applies-to'
+  | 'supports-cognition'
+  | 'maps-to-curriculum'
+  | 'maps-to-mistake';
 
 export interface TextbookReference {
   subject: SubjectCode;
@@ -19,6 +32,44 @@ export interface KnowledgePoint {
   keywords: string[];
   commonMistakes: string[];
   prerequisiteIds: string[];
+}
+
+export interface FoundationKnowledgeNode {
+  key: string;
+  label: string;
+  domain: FoundationScienceDomain;
+  domainLayer: Extract<KnowledgeDomainLayer, 'foundation-science'>;
+  scale: FoundationKnowledgeScale;
+  summary: string;
+  coreQuestion: string;
+  prerequisites: string[];
+  relatedCurriculumNodes: string[];
+  relatedMistakePatterns: string[];
+  keywords: string[];
+  mediaPromptSeed: {
+    visualMetaphor: string;
+    gptImageStyle: string;
+    seedanceStoryboard: string[];
+  };
+}
+
+export interface FoundationKnowledgeEdge {
+  source: string;
+  target: string;
+  kind: KnowledgeEdgeKind;
+  rationale: string;
+}
+
+export interface FoundationKnowledgeMatch {
+  node: FoundationKnowledgeNode;
+  score: number;
+  reasons: string[];
+  edges: FoundationKnowledgeEdge[];
+}
+
+export interface FoundationScienceCatalogQuery {
+  domain?: FoundationScienceDomain;
+  keyword?: string;
 }
 
 export interface ExamQuestion {
@@ -59,6 +110,19 @@ export interface QuestionMatch {
   rationale: string;
 }
 
+export interface KnowledgePointNeighborhood {
+  knowledgePoint: KnowledgePoint;
+  prerequisites: KnowledgePoint[];
+  dependents: KnowledgePoint[];
+  relatedQuestions: ExamQuestion[];
+}
+
+export interface ContentCatalogQuery {
+  subject?: SubjectCode;
+  grade?: string;
+  keyword?: string;
+}
+
 export interface MobiusStorySeed {
   painPoint: string;
   rule: string;
@@ -73,6 +137,8 @@ export interface ErrorToContentResolution {
   input: ErrorToContentInput;
   errorRecord: ErrorRecord;
   matchedKnowledgePoints: ContentMatch[];
+  recommendedFoundationNodes: FoundationKnowledgeMatch[];
   relatedQuestions: QuestionMatch[];
+  graphDecisionContext?: KnowledgeGraphDecisionContext;
   recommendedStorySeed: MobiusStorySeed;
 }

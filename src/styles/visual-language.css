@@ -1,0 +1,179 @@
+.vl-page {
+  position: relative;
+  background:
+    linear-gradient(125deg, rgba(255, 255, 255, 0.66) 0 18%, transparent 18% 100%),
+    linear-gradient(305deg, rgba(255, 250, 240, 0.7) 0 14%, transparent 14% 100%),
+    radial-gradient(ellipse at 50% 0%, rgba(255, 255, 255, 0.92), transparent 36%),
+    linear-gradient(180deg, var(--vl-sky) 0%, #f4fbff 46%, var(--vl-cloud) 100%);
+  color: var(--vl-ink);
+}
+
+.vl-page::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(105deg, transparent 0 28%, rgba(255, 255, 255, 0.64) 28% 29%, transparent 29% 100%),
+    linear-gradient(285deg, transparent 0 42%, rgba(255, 255, 255, 0.48) 42% 43%, transparent 43% 100%),
+    radial-gradient(ellipse at 16% 18%, rgba(255, 255, 255, 0.78), transparent 23%),
+    radial-gradient(ellipse at 78% 82%, rgba(255, 250, 230, 0.68), transparent 28%);
+  background-size: 180px 120px, 220px 150px, 100% 100%, 100% 100%;
+  opacity: 0.78;
+}
+
+.cloud-glass {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.62);
+  backdrop-filter: blur(18px);
+  box-shadow: var(--vl-shadow-cloud), inset 0 1px 0 rgba(255, 255, 255, 0.82);
+}
+
+.cloud-glass::before,
+.parchment-panel::before,
+.island-card::before,
+.crystal-panel::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+
+.cloud-glass::before {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.52), transparent 56%),
+    radial-gradient(circle at top right, rgba(255, 211, 106, 0.14), transparent 30%);
+}
+
+.parchment-panel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(176, 136, 72, 0.24);
+  background:
+    linear-gradient(180deg, rgba(255, 253, 247, 0.98), rgba(255, 246, 227, 0.94)),
+    var(--vl-parchment);
+  box-shadow: var(--vl-shadow-parchment), inset 0 1px 0 rgba(255, 255, 255, 0.88);
+}
+
+.parchment-panel::before {
+  background:
+    radial-gradient(circle at 0 0, rgba(255, 211, 106, 0.12), transparent 34%),
+    radial-gradient(circle at 100% 100%, rgba(176, 136, 72, 0.08), transparent 34%);
+}
+
+.island-card {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.72);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.62), rgba(255, 246, 227, 0.88)),
+    linear-gradient(160deg, rgba(79, 214, 230, 0.18), rgba(255, 255, 255, 0.72));
+  box-shadow: var(--vl-shadow-island), inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.island-card::before {
+  background:
+    radial-gradient(circle at 18% 16%, rgba(255, 255, 255, 0.7), transparent 24%),
+    radial-gradient(circle at 84% 82%, rgba(255, 211, 106, 0.18), transparent 30%);
+}
+
+.crystal-panel {
+  position: relative;
+  overflow: hidden;
+  border: 1px solid rgba(79, 214, 230, 0.22);
+  background:
+    linear-gradient(135deg, rgba(18, 35, 68, 0.96), rgba(14, 129, 151, 0.86)),
+    linear-gradient(rgba(157, 216, 255, 0.08) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(157, 216, 255, 0.08) 1px, transparent 1px);
+  background-size: 100% 100%, 18px 18px, 18px 18px;
+  box-shadow: 0 22px 44px rgba(18, 35, 68, 0.24), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+}
+
+.crystal-panel::before {
+  background:
+    radial-gradient(circle at 18% 22%, rgba(255, 255, 255, 0.18), transparent 26%),
+    linear-gradient(120deg, transparent 0 36%, rgba(255, 255, 255, 0.08) 36% 37%, transparent 37% 100%);
+}
+
+.vl-surface > * {
+  position: relative;
+  z-index: 1;
+}
+
+.mission-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  border-radius: 9999px;
+  border: 1px solid rgba(176, 136, 72, 0.24);
+  background: linear-gradient(180deg, #fffdf7, var(--vl-parchment));
+  padding: 0.34rem 0.68rem;
+  color: var(--vl-ink);
+  font-size: 0.68rem;
+  font-weight: 900;
+  line-height: 1;
+  box-shadow: 0 9px 16px rgba(93, 64, 28, 0.08);
+}
+
+.mission-badge[data-tone='main'] {
+  border-color: rgba(255, 211, 106, 0.54);
+  background: linear-gradient(180deg, #ffe79a, var(--vl-line));
+}
+
+.mission-badge[data-tone='success'] {
+  border-color: rgba(126, 219, 168, 0.4);
+  background: linear-gradient(180deg, #ebfff5, rgba(126, 219, 168, 0.26));
+  color: #176a50;
+}
+
+.mission-badge[data-tone='danger'] {
+  border-color: rgba(255, 107, 107, 0.36);
+  background: linear-gradient(180deg, #fff2f0, rgba(255, 107, 107, 0.18));
+  color: #9f2c35;
+}
+
+.game-button-vl {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 38px;
+  border-radius: 9999px;
+  border: 1px solid rgba(18, 35, 68, 0.14);
+  padding: 0.58rem 0.9rem;
+  font-weight: 900;
+  line-height: 1.1;
+  box-shadow: 0 12px 22px rgba(61, 123, 255, 0.16), 0 4px 0 rgba(18, 35, 68, 0.12);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
+}
+
+.game-button-vl::before {
+  content: '';
+  position: absolute;
+  inset: 1px;
+  border-radius: inherit;
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.38), transparent 58%);
+  pointer-events: none;
+}
+
+.game-button-vl > * {
+  position: relative;
+  z-index: 1;
+}
+
+.game-button-vl:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: saturate(1.04);
+}
+
+.game-button-vl:active:not(:disabled) {
+  transform: translateY(3px);
+  box-shadow: 0 6px 14px rgba(61, 123, 255, 0.14), 0 1px 0 rgba(18, 35, 68, 0.1);
+}
+
+.game-button-vl:disabled {
+  cursor: not-allowed;
+  opacity: 0.62;
+}
