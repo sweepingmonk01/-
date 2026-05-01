@@ -39,6 +39,13 @@ test('dehydrateHomeworkRequestSchema normalizes strategic context defaults', () 
     strategicContext: {
       recentPainPoints: [' 几何辅助线 ', '几何辅助线', ' 英语时态 '],
       graphHotspots: [' 几何辅助线 图谱热点 4x ', '几何辅助线 图谱热点 4x'],
+      visualSignals: [{
+        kind: 'page-shape',
+        label: ' 长截图作业页 ',
+        severity: 'watch',
+        confidence: 2,
+        evidence: [' 900x2400 ', '900x2400', 'height/width=2.67'],
+      }],
     },
   });
 
@@ -46,5 +53,12 @@ test('dehydrateHomeworkRequestSchema normalizes strategic context defaults', () 
   assert.equal(parsed.targetScore, 115);
   assert.deepEqual(parsed.strategicContext?.recentPainPoints, ['几何辅助线', '英语时态']);
   assert.deepEqual(parsed.strategicContext?.graphHotspots, ['几何辅助线 图谱热点 4x']);
+  assert.deepEqual(parsed.strategicContext?.visualSignals, [{
+    kind: 'page-shape',
+    label: '长截图作业页',
+    severity: 'watch',
+    confidence: 1,
+    evidence: ['900x2400', 'height/width=2.67'],
+  }]);
   assert.equal(parsed.strategicContext?.interactionFailureCount, 0);
 });

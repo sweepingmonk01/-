@@ -58,6 +58,14 @@ const imageMimeTypeSchema = z
   .transform((value) => value.trim().toLowerCase())
   .pipe(z.string().regex(/^image\/[a-zA-Z0-9.+-]+$/, 'mimeType must be a valid image mime type.'));
 
+const homeworkVisualSignalsSchema = z.array(z.object({
+  kind: z.enum(['image-format', 'page-shape', 'detail-density', 'capture-risk']),
+  label: normalizedString(120, 'visualSignal.label'),
+  severity: z.enum(['info', 'watch', 'risk']).optional().default('info'),
+  confidence: z.number().finite().optional().default(0.5).transform((value) => Math.max(0, Math.min(1, value))),
+  evidence: z.array(z.string()).optional().default([]).transform((items) => normalizeStringList(items, 120, 4)),
+})).optional().default([]).transform((items) => items.slice(0, 6));
+
 export const analyzeQuestionImageRequestSchema = z.object({
   imageBase64: normalizedString(6_000_000, 'imageBase64'),
   mimeType: imageMimeTypeSchema,
@@ -81,6 +89,7 @@ export const strategicContextSchema = z.object({
   weakTopicAlerts: z.array(z.string()).optional().default([]).transform((items) => normalizeStringList(items, 240, 12)),
   graphHotspots: z.array(z.string()).optional().default([]).transform((items) => normalizeStringList(items, 240, 8)),
   graphNeighborSignals: z.array(z.string()).optional().default([]).transform((items) => normalizeStringList(items, 240, 8)),
+  visualSignals: homeworkVisualSignalsSchema,
   interactionFailureCount: z.number().optional().default(0).transform((value) => Math.max(0, Math.round(value))),
   interactionSuccessCount: z.number().optional().default(0).transform((value) => Math.max(0, Math.round(value))),
 });
@@ -168,6 +177,7 @@ export const dehydrateResultSchema = z.object({
       reviewQuestions: z.array(z.string()).optional().default([]).transform((items) => normalizeStringList(items, 64, 12)),
       skipQuestions: z.array(z.string()).optional().default([]).transform((items) => normalizeStringList(items, 64, 12)),
       questionPlans: z.array(questionPlanSchema).optional().default([]).transform((items) => items.slice(0, 24)),
+      visualSignals: homeworkVisualSignalsSchema,
     })
     .optional(),
 }).superRefine((value, ctx) => {

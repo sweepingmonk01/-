@@ -162,6 +162,8 @@ export const createDemoDehydrateHomeworkResult = (input: DehydrateHomeworkInput)
     ...(input.strategicContext?.recentPainPoints ?? []).map((item) => `${item} 最近反复出现，继续失分风险高。`),
   ]).slice(0, 4);
   const questionPlans = buildQuestionPlans(mustDoLabels, focusTopics, weakTopicAlerts);
+  const visualSignals = input.strategicContext?.visualSignals ?? [];
+  const primaryVisualSignal = visualSignals.find((signal) => signal.severity !== 'info') ?? visualSignals[0];
 
   return {
     total,
@@ -171,7 +173,7 @@ export const createDemoDehydrateHomeworkResult = (input: DehydrateHomeworkInput)
     mustDoIndices,
     reasoning: `当前是 demo fallback：目标 ${input.targetScore} 分不需要全卷清空，只打高回报区，机械题和超纲题直接剥离。`,
     strategicPlan: {
-      commanderBriefing: `Demo 战略官判定：这页作业只需要主攻 ${mustDo} 题，先拿确定性分数。`,
+      commanderBriefing: `Demo 战略官判定：这页作业只需要主攻 ${mustDo} 题，先拿确定性分数。${primaryVisualSignal ? ` 视觉信号：${primaryVisualSignal.label}。` : ''}`,
       immediateOrder: `先完成 ${mustDoLabels.slice(0, 3).join('、') || mustDoIndices}，其余题按 ROI 延后。`,
       focusKnowledgePoints: focusTopics.length ? focusTopics : FALLBACK_FOCUS_TOPICS.slice(0, 3),
       weakTopicAlerts,
@@ -179,6 +181,7 @@ export const createDemoDehydrateHomeworkResult = (input: DehydrateHomeworkInput)
       reviewQuestions: mustDoLabels.slice(3, 5),
       skipQuestions,
       questionPlans,
+      visualSignals,
     },
   };
 };

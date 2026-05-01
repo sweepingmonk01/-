@@ -9,6 +9,16 @@ import { StateVectorService } from '../../student-state/application/state-vector
 import { SQLiteStudentProfileRepository } from '../../student-state/infrastructure/sqlite-student-profile-repository.js';
 import { SQLiteStudentStateRepository } from '../../student-state/infrastructure/sqlite-student-state-repository.js';
 
+const pngBase64 = (width: number, height: number) => {
+  const bytes = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(bytes, 0);
+  bytes.writeUInt32BE(13, 8);
+  bytes.write('IHDR', 12, 'ascii');
+  bytes.writeUInt32BE(width, 16);
+  bytes.writeUInt32BE(height, 20);
+  return bytes.toString('base64');
+};
+
 test('StrategicPlannerService merges model ROI output with ranked weak-topic alerts', async () => {
   const tempDir = mkdtempSync(path.join(tmpdir(), 'liezi-strategic-planner-'));
   const dbFile = path.join(tempDir, 'mobius.sqlite');
@@ -84,6 +94,8 @@ test('StrategicPlannerService merges model ROI output with ranked weak-topic ale
         capturedTargetScore = input.targetScore;
         assert.deepEqual(input.strategicContext.graphHotspots, ['几何辅助线 图谱热点 4x']);
         assert.deepEqual(input.strategicContext.graphNeighborSignals, ['倍长中线 相邻于 几何辅助线，建议连带修复']);
+        assert.ok(input.strategicContext.visualSignals.some((signal: any) =>
+          signal.kind === 'page-shape' && signal.label === '长截图作业页'));
         return {
           total: 12,
           trashEasy: 2,
@@ -100,6 +112,13 @@ test('StrategicPlannerService merges model ROI output with ranked weak-topic ale
             reviewQuestions: ['Q5'],
             skipQuestions: ['Q11'],
             questionPlans: [],
+            visualSignals: [{
+              kind: 'capture-risk',
+              label: '模型识别：题号密集',
+              severity: 'watch',
+              confidence: 0.7,
+              evidence: ['model-output'],
+            }],
           },
         };
       },
@@ -125,7 +144,7 @@ test('StrategicPlannerService merges model ROI output with ranked weak-topic ale
 
   const result = await service.planHomework({
     studentId: 'student-a',
-    imageBase64: 'base64',
+    imageBase64: pngBase64(900, 2400),
     mimeType: 'image/png',
   });
 
@@ -141,4 +160,6 @@ test('StrategicPlannerService merges model ROI output with ranked weak-topic ale
     '英语时态',
     '倍长中线',
   ]);
+  assert.ok(result.strategicPlan?.visualSignals?.some((signal) => signal.label === '模型识别：题号密集'));
+  assert.ok(result.strategicPlan?.visualSignals?.some((signal) => signal.label === '长截图作业页'));
 });

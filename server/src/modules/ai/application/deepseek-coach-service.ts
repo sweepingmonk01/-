@@ -185,6 +185,7 @@ export class DeepSeekCoachService {
             'Required top-level keys: total, trashEasy, dropHard, mustDo, mustDoIndices, reasoning, strategicPlan.',
             'strategicPlan keys: commanderBriefing, immediateOrder, focusKnowledgePoints, weakTopicAlerts, attackQuestions, reviewQuestions, skipQuestions, questionPlans.',
             'Each questionPlans item needs questionLabel, topic, action, estimatedMinutes, roiScore, rationale, extractedKnowledgePoint.',
+            'Use strategicContext.visualSignals as lightweight page-layout evidence; do not invent OCR details from those signals alone.',
           ].join(' '),
         },
         {

@@ -143,6 +143,17 @@ export interface DehydrateHomeworkRequest {
   studentId?: string;
 }
 
+export type HomeworkVisualSignalKind = 'image-format' | 'page-shape' | 'detail-density' | 'capture-risk';
+export type HomeworkVisualSignalSeverity = 'info' | 'watch' | 'risk';
+
+export interface HomeworkVisualSignal {
+  kind: HomeworkVisualSignalKind;
+  label: string;
+  severity: HomeworkVisualSignalSeverity;
+  confidence: number;
+  evidence: string[];
+}
+
 export interface StrategicQuestionPlan {
   questionLabel: string;
   topic: string;
@@ -162,6 +173,7 @@ export interface StrategicPlannerResult {
   reviewQuestions: string[];
   skipQuestions: string[];
   questionPlans: StrategicQuestionPlan[];
+  visualSignals?: HomeworkVisualSignal[];
 }
 
 export interface DehydrateResult {

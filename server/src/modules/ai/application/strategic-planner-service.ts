@@ -1,6 +1,7 @@
-import type { DehydrateResult, StrategicPlannerResult } from '../domain/types.js';
+import type { DehydrateResult, HomeworkVisualSignal, StrategicPlannerResult } from '../domain/types.js';
 import { DeepSeekCoachService } from './deepseek-coach-service.js';
 import { GraphWeaverService } from './graph-weaver-service.js';
+import { buildHomeworkVisualSignals } from './homework-visual-signal-service.js';
 import { StateVectorService } from '../../student-state/application/state-vector-service.js';
 import { SQLiteStudentProfileRepository } from '../../student-state/infrastructure/sqlite-student-profile-repository.js';
 
@@ -37,6 +38,7 @@ export class StrategicPlannerService {
     const weakTopicAlerts = this.buildWeakTopicAlerts(activeErrors.map((item) => item.painPoint), stateVector);
     const graphHotspots = this.buildGraphHotspots(graphDecisionContext);
     const graphNeighborSignals = this.buildGraphNeighborSignals(graphDecisionContext);
+    const visualSignals = buildHomeworkVisualSignals(input);
 
     const result = await this.deps.coachService.strategicPlanHomework({
       imageBase64: input.imageBase64,
@@ -53,6 +55,7 @@ export class StrategicPlannerService {
         weakTopicAlerts,
         graphHotspots,
         graphNeighborSignals,
+        visualSignals,
         interactionFailureCount: stateVector?.sessionContext.recentFailureCount ?? 0,
         interactionSuccessCount: stateVector?.sessionContext.recentSuccessCount ?? 0,
       },
@@ -65,6 +68,7 @@ export class StrategicPlannerService {
         weakTopicAlerts,
         graphHotspots,
         graphNeighborSignals,
+        visualSignals,
       ),
     };
   }
@@ -74,6 +78,7 @@ export class StrategicPlannerService {
     weakTopicAlerts: string[],
     graphHotspots: string[],
     graphNeighborSignals: string[],
+    visualSignals: HomeworkVisualSignal[],
   ): StrategicPlannerResult | undefined {
     if (!strategicPlan) return undefined;
     const mergedAlerts = this.mergeAlertLists(
@@ -87,6 +92,7 @@ export class StrategicPlannerService {
 
     return {
       ...strategicPlan,
+      visualSignals: this.mergeVisualSignals(strategicPlan.visualSignals ?? [], visualSignals),
       focusKnowledgePoints,
       weakTopicAlerts: mergedAlerts,
     };
@@ -103,6 +109,21 @@ export class StrategicPlannerService {
       if (seenKeys.has(key)) continue;
       seenKeys.add(key);
       merged.push(normalized);
+    }
+
+    return merged;
+  }
+
+  private mergeVisualSignals(primary: HomeworkVisualSignal[], secondary: HomeworkVisualSignal[]): HomeworkVisualSignal[] {
+    const merged: HomeworkVisualSignal[] = [];
+    const seenKeys = new Set<string>();
+
+    for (const signal of [...primary, ...secondary]) {
+      const key = `${signal.kind}:${signal.label}`;
+      if (seenKeys.has(key)) continue;
+      seenKeys.add(key);
+      merged.push(signal);
+      if (merged.length >= 6) break;
     }
 
     return merged;
