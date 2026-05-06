@@ -1,6 +1,8 @@
 import type { CognitiveState } from '../../mobius/domain/types.js';
 import type {
   LearningCycleEvent,
+  LearningEvidenceEvent,
+  LearningModelEvaluation,
   LearningCycleRecord,
   RecordFoundationExplorationInput,
   RecordInteractionResolutionInput,
@@ -43,6 +45,50 @@ const summarizeCycle = (cycle: LearningCycleRecord) => ({
   createdAt: cycle.createdAt,
   updatedAt: cycle.updatedAt,
 });
+
+const extractSelectedPrediction = (cycle: LearningCycleRecord) => {
+  const selectedStrategy = cycle.selectedAction?.selectedStrategy;
+  const selectedCandidate = cycle.selectedAction?.strategyCandidates?.find((candidate) =>
+    candidate.strategy === selectedStrategy);
+  const probability = selectedCandidate?.expectedUtility?.successProbability;
+
+  if (typeof probability !== 'number' || !Number.isFinite(probability)) return null;
+  if (cycle.outcome !== 'success' && cycle.outcome !== 'failure') return null;
+
+  return {
+    predicted: Math.max(0, Math.min(1, probability / 100)),
+    actual: cycle.outcome === 'success' ? 1 : 0,
+  };
+};
+
+const buildModelEvaluation = (cycles: LearningCycleRecord[]): LearningModelEvaluation => {
+  const predictions = cycles
+    .map(extractSelectedPrediction)
+    .filter((item): item is { predicted: number; actual: number } => Boolean(item));
+  const brierScores = predictions.map((item) => (item.predicted - item.actual) ** 2);
+  const buckets = new Map<string, Array<{ predicted: number; actual: number }>>();
+
+  for (const prediction of predictions) {
+    const floor = Math.floor(prediction.predicted * 5) / 5;
+    const lower = Math.min(0.8, floor);
+    const upper = lower + 0.2;
+    const key = `${Math.round(lower * 100)}-${Math.round(upper * 100)}`;
+    buckets.set(key, [...(buckets.get(key) ?? []), prediction]);
+  }
+
+  return {
+    completedPredictions: predictions.length,
+    averageBrierScore: average(brierScores),
+    calibrationBuckets: Array.from(buckets.entries())
+      .map(([bucket, items]) => ({
+        bucket,
+        count: items.length,
+        averagePredicted: average(items.map((item) => item.predicted)),
+        actualSuccessRate: average(items.map((item) => item.actual)),
+      }))
+      .sort((left, right) => left.bucket.localeCompare(right.bucket)),
+  };
+};
 
 const buildEvaluation = (cycles: LearningCycleRecord[]) => {
   const completed = cycles.filter((cycle) => cycle.outcome === 'success' || cycle.outcome === 'failure');
@@ -88,10 +134,30 @@ const buildEvaluation = (cycles: LearningCycleRecord[]) => {
     averageEffectScore: average(effectScores),
     repeatedPainPoints: painPointTrends.filter((item) => item.attempts > 1),
     painPointTrends,
+    modelEvaluation: buildModelEvaluation(cycles),
   };
 };
 
-const buildFlow = (cycle: LearningCycleRecord, events: LearningCycleEvent[]) => ({
+const summarizeEvidence = (evidence: LearningEvidenceEvent) => ({
+  id: evidence.id,
+  modality: evidence.modality,
+  source: evidence.source,
+  targetNodeKey: evidence.targetNodeKey,
+  painPoint: evidence.painPoint,
+  rule: evidence.rule,
+  confidence: evidence.confidence,
+  observedAt: evidence.observedAt,
+  outcome: evidence.outcome,
+  modelVersion: evidence.modelVersion,
+  privacyLevel: evidence.privacyLevel,
+  payload: evidence.payload,
+});
+
+const buildFlow = (
+  cycle: LearningCycleRecord,
+  events: LearningCycleEvent[],
+  evidenceEvents: LearningEvidenceEvent[],
+) => ({
   stateBefore: cycle.stateBefore,
   hypothesis: cycle.hypothesisSummary,
   selectedAction: cycle.selectedAction,
@@ -101,6 +167,7 @@ const buildFlow = (cycle: LearningCycleRecord, events: LearningCycleEvent[]) => 
     status: cycle.status,
   },
   stateAfter: cycle.stateAfter,
+  evidence: evidenceEvents.map(summarizeEvidence),
   events: events.map((event) => ({
     id: event.id,
     eventType: event.eventType,
@@ -153,6 +220,41 @@ export class LearningCycleService {
         eventPayload: {
           phase: 'session-created',
           selectedAction: toJsonObject(cycle.selectedAction),
+        },
+      });
+    }
+    await this.repository.appendEvidence({
+      studentId: cycle.studentId,
+      cycleId: cycle.id,
+      modality: 'interaction',
+      source: 'mobius.state.prior',
+      painPoint: cycle.painPoint,
+      rule: cycle.rule,
+      confidence: 0.7,
+      observedAt: cycle.createdAt,
+      modelVersion: 'probabilistic-v1',
+      privacyLevel: 'server',
+      payload: {
+        stateBefore: cycle.stateBefore ? toJsonObject(cycle.stateBefore) : undefined,
+        stateVectorVersion: input.stateVectorBefore?.version,
+        stateVector: input.stateVectorBefore ? toJsonObject(input.stateVectorBefore) : undefined,
+      },
+    });
+    if (cycle.selectedAction) {
+      await this.repository.appendEvidence({
+        studentId: cycle.studentId,
+        cycleId: cycle.id,
+        modality: 'interaction',
+        source: 'mobius.action.selected',
+        painPoint: cycle.painPoint,
+        rule: cycle.rule,
+        confidence: 0.75,
+        observedAt: cycle.createdAt,
+        modelVersion: 'probabilistic-v1',
+        privacyLevel: 'server',
+        payload: {
+          selectedAction: toJsonObject(cycle.selectedAction),
+          selectedStrategy: cycle.selectedAction.selectedStrategy,
         },
       });
     }
@@ -239,6 +341,31 @@ export class LearningCycleService {
         effectScore: cycle.effectScore,
       },
     });
+    await this.repository.appendEvidence({
+      studentId: cycle.studentId,
+      cycleId: cycle.id,
+      modality: 'transfer',
+      source: 'foundation.exploration.outcome',
+      targetNodeKey: input.nodeKey,
+      painPoint: cycle.painPoint,
+      rule: cycle.rule,
+      confidence: 0.8,
+      observedAt: cycle.updatedAt,
+      outcome: input.outcome,
+      modelVersion: 'probabilistic-v1',
+      privacyLevel: 'server',
+      payload: {
+        domain: input.domain,
+        taskId: input.taskId,
+        taskLabel: input.taskLabel,
+        actionType: input.actionType,
+        stateBefore: toJsonObject(input.stateBefore),
+        stateAfter: toJsonObject(input.stateAfter),
+        stateVectorBeforeVersion: input.stateVectorBefore?.version,
+        stateVectorAfterVersion: input.stateVectorAfter?.version,
+        note: input.note,
+      },
+    });
 
     return cycle;
   }
@@ -298,6 +425,30 @@ export class LearningCycleService {
         },
       });
     }
+    await this.repository.appendEvidence({
+      studentId: updated.studentId,
+      cycleId: updated.id,
+      modality: 'interaction',
+      source: 'mobius.interaction.outcome',
+      painPoint: updated.painPoint,
+      rule: updated.rule,
+      confidence: 0.85,
+      observedAt: updated.updatedAt,
+      outcome: input.outcome,
+      modelVersion: 'probabilistic-v1',
+      privacyLevel: 'server',
+      payload: {
+        stateBefore: input.stateBefore ? toJsonObject(input.stateBefore) : undefined,
+        stateAfter: toJsonObject(input.stateAfter),
+        stateVectorBeforeVersion: input.stateVectorBefore?.version,
+        stateVectorAfterVersion: input.stateVectorAfter?.version,
+        selectedAction: cycle.selectedAction ? toJsonObject(cycle.selectedAction) : undefined,
+        followupStrategyDecision: input.followupStrategyDecision ? toJsonObject(input.followupStrategyDecision) : undefined,
+        actionType: input.actionType,
+        submission: input.submission ? toJsonObject(input.submission) : undefined,
+        adjudication: input.adjudication ? toJsonObject(input.adjudication) : undefined,
+      },
+    });
 
     return updated;
   }
@@ -347,6 +498,21 @@ export class LearningCycleService {
         hypothesisSummary: toJsonObject(input.hypothesisSummary),
       },
     });
+    await this.repository.appendEvidence({
+      studentId: updated.studentId,
+      cycleId: updated.id,
+      modality: 'diagnosis',
+      source: 'hypothesis.posterior',
+      painPoint: updated.painPoint,
+      rule: updated.rule,
+      confidence: input.hypothesisSummary.selectedHypothesis?.confidence ?? 0.5,
+      observedAt: updated.updatedAt,
+      modelVersion: input.hypothesisSummary.source,
+      privacyLevel: 'server',
+      payload: {
+        hypothesisSummary: toJsonObject(input.hypothesisSummary),
+      },
+    });
 
     return updated;
   }
@@ -370,11 +536,12 @@ export class LearningCycleService {
     if (!cycle || cycle.studentId !== studentId) return null;
 
     const events = await this.repository.listEvents(cycleId);
+    const evidenceEvents = await this.repository.listEvidenceByCycle(cycleId);
 
     return {
       studentId,
       cycle: summarizeCycle(cycle),
-      flow: buildFlow(cycle, events),
+      flow: buildFlow(cycle, events, evidenceEvents),
     };
   }
 }

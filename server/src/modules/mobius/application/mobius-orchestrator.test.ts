@@ -8,7 +8,7 @@ import { LearningCycleService } from '../../analytics/application/learning-cycle
 import { SQLiteLearningCycleRepository } from '../../analytics/infrastructure/sqlite-learning-cycle-repository.js';
 import { StateUpdateEngine } from '../../student-state/application/state-update-engine.js';
 import { StateVectorService } from '../../student-state/application/state-vector-service.js';
-import { HeuristicCognitiveEngine } from '../infrastructure/heuristic-cognitive-engine.js';
+import { ProbabilisticCognitiveEngine } from '../infrastructure/probabilistic-cognitive-engine.js';
 import { HeuristicStoryPlanner } from '../infrastructure/heuristic-story-planner.js';
 import { ScoredStrategyScheduler } from '../infrastructure/scored-strategy-scheduler.js';
 import { StubSeedanceClient } from '../infrastructure/stub-seedance-client.js';
@@ -30,7 +30,7 @@ test('MobiusOrchestrator builds a session with structured error profile', async 
     dbFile: path.join(tempDir, 'mobius.sqlite'),
   }));
   const orchestrator = new MobiusOrchestrator({
-    cognitiveEngine: new HeuristicCognitiveEngine(),
+    cognitiveEngine: new ProbabilisticCognitiveEngine(),
     storyPlanner: new HeuristicStoryPlanner(),
     videoClient: new StubSeedanceClient(),
     mediaJobs: new SQLiteMediaJobRepository({
@@ -126,7 +126,7 @@ test('MobiusOrchestrator adjudicates structured interaction submissions', async 
     dbFile: path.join(tempDir, 'mobius.sqlite'),
   }));
   const orchestrator = new MobiusOrchestrator({
-    cognitiveEngine: new HeuristicCognitiveEngine(),
+    cognitiveEngine: new ProbabilisticCognitiveEngine(),
     storyPlanner: new HeuristicStoryPlanner(),
     videoClient: new StubSeedanceClient(),
     mediaJobs: new SQLiteMediaJobRepository({
@@ -184,6 +184,7 @@ test('MobiusOrchestrator adjudicates structured interaction submissions', async 
   const cycle = await learningCycles.getCycleByMediaJobId(session.video.jobId!);
   assert.equal(cycle?.selectedAction?.selectedStrategy, 'probe');
   assert.equal(cycle?.selectedAction?.strategyCandidates?.length, 3);
+  assert.ok(cycle?.selectedAction?.strategyCandidates?.[0]?.expectedUtility?.successProbability);
 });
 
 test('MobiusOrchestrator records different state vector versions before and after failure resolution', async () => {
@@ -198,7 +199,7 @@ test('MobiusOrchestrator records different state vector versions before and afte
   const learningCycleRepository = new SQLiteLearningCycleRepository({ dbFile });
   const learningCycles = new LearningCycleService(learningCycleRepository);
   const orchestrator = new MobiusOrchestrator({
-    cognitiveEngine: new HeuristicCognitiveEngine(),
+    cognitiveEngine: new ProbabilisticCognitiveEngine(),
     storyPlanner: new HeuristicStoryPlanner(),
     videoClient: new StubSeedanceClient(),
     mediaJobs: new SQLiteMediaJobRepository({ dbFile }),
@@ -232,6 +233,9 @@ test('MobiusOrchestrator records different state vector versions before and afte
   const cycle = await learningCycleRepository.getByMediaJobId(session.video.jobId!);
   assert.ok(cycle);
   const events = await learningCycleRepository.listEvents(cycle!.id);
+  const evidence = await learningCycleRepository.listEvidenceByCycle(cycle!.id);
+  assert.ok(evidence.some((item) => item.source === 'mobius.state.prior'));
+  assert.ok(evidence.some((item) => item.source === 'mobius.interaction.outcome' && item.outcome === 'failure'));
   const beforeEvent = events.find((event) => event.eventType === 'state.snapshot.before');
   const afterEvent = events.find((event) => event.eventType === 'state.snapshot.after');
 
@@ -287,7 +291,7 @@ test('MobiusOrchestrator reuses the same scheduler for follow-up actions after r
   const learningCycleRepository = new SQLiteLearningCycleRepository({ dbFile });
   const learningCycles = new LearningCycleService(learningCycleRepository);
   const orchestrator = new MobiusOrchestrator({
-    cognitiveEngine: new HeuristicCognitiveEngine(),
+    cognitiveEngine: new ProbabilisticCognitiveEngine(),
     storyPlanner: new HeuristicStoryPlanner(),
     videoClient: new StubSeedanceClient(),
     mediaJobs: new SQLiteMediaJobRepository({ dbFile }),
@@ -355,7 +359,7 @@ test('MobiusOrchestrator selects teach strategy under high-frustration repeated 
     updateEngine: stateUpdateEngine,
   });
   const orchestrator = new MobiusOrchestrator({
-    cognitiveEngine: new HeuristicCognitiveEngine(),
+    cognitiveEngine: new ProbabilisticCognitiveEngine(),
     storyPlanner: new HeuristicStoryPlanner(),
     videoClient: new StubSeedanceClient(),
     mediaJobs: new SQLiteMediaJobRepository({ dbFile }),
@@ -401,7 +405,7 @@ test('MobiusOrchestrator creates knowledge node video jobs with first-frame refe
   });
   const capturedPrompts: Array<{ prompt: string; referenceImages?: string[] }> = [];
   const orchestrator = new MobiusOrchestrator({
-    cognitiveEngine: new HeuristicCognitiveEngine(),
+    cognitiveEngine: new ProbabilisticCognitiveEngine(),
     storyPlanner: new HeuristicStoryPlanner(),
     videoClient: {
       createVideo: async (prompt) => {

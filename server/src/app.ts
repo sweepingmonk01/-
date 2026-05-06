@@ -20,8 +20,8 @@ import { ContentController } from './modules/content/presentation/content-contro
 import { FirebaseTokenVerifier } from './modules/auth/application/firebase-token-verifier.js';
 import { createMobiusAuthMiddleware } from './modules/auth/presentation/mobius-auth-middleware.js';
 import { MobiusOrchestrator } from './modules/mobius/application/mobius-orchestrator.js';
-import { HeuristicCognitiveEngine } from './modules/mobius/infrastructure/heuristic-cognitive-engine.js';
 import { HeuristicStoryPlanner } from './modules/mobius/infrastructure/heuristic-story-planner.js';
+import { ProbabilisticCognitiveEngine } from './modules/mobius/infrastructure/probabilistic-cognitive-engine.js';
 import { ScoredStrategyScheduler } from './modules/mobius/infrastructure/scored-strategy-scheduler.js';
 import { FileMediaJobRepository } from './modules/mobius/infrastructure/file-media-job-repository.js';
 import { SQLiteMediaJobRepository } from './modules/mobius/infrastructure/sqlite-media-job-repository.js';
@@ -111,7 +111,7 @@ export const createMobiusApp = () => {
   });
 
   const orchestrator = new MobiusOrchestrator({
-    cognitiveEngine: new HeuristicCognitiveEngine(),
+    cognitiveEngine: new ProbabilisticCognitiveEngine(),
     storyPlanner: new HeuristicStoryPlanner(),
     videoClient,
     mediaJobs,

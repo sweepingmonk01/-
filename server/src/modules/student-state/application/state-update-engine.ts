@@ -6,8 +6,12 @@ import {
   normalizeCognitiveState,
   type CognitiveState,
 } from '../../../../../shared/cognitive-state.js';
+import {
+  percentToProbability,
+  probabilityToPercent,
+  updateBetaBelief,
+} from '../../ai/application/probabilistic-model.js';
 
-const clampPercent = (value: number) => Math.max(0, Math.min(100, Math.round(value)));
 const clampUnit = (value: number) => Math.max(0, Math.min(1, Number(value.toFixed(2))));
 
 export class StateUpdateEngine {
@@ -16,39 +20,45 @@ export class StateUpdateEngine {
   }
 
   transitionInteractionState(previous: CognitiveState, outcome: InteractionOutcome): CognitiveState {
-    const delta = outcome === 'success'
-      ? { time: 6, signalNoiseRatio: 10, emotion: 8, confidence: 12, fatigue: -2 }
-      : { time: -7, signalNoiseRatio: -12, emotion: -9, confidence: -10, fatigue: 5 };
+    const evidence = outcome === 'success'
+      ? { positive: 1.8, negative: 0.35 }
+      : { positive: 0.35, negative: 1.8 };
+    const fatigueEvidence = outcome === 'success'
+      ? { positive: 0.35, negative: 1.4 }
+      : { positive: 1.2, negative: 0.45 };
 
     return {
       schemaVersion: 'ai-active-v2',
       kernel: {
-        time: clampPercent(previous.kernel.time + delta.time),
-        signalNoiseRatio: clampPercent(previous.kernel.signalNoiseRatio + delta.signalNoiseRatio),
-        emotion: clampPercent(previous.kernel.emotion + delta.emotion),
+        time: this.updatePercentBelief(previous.kernel.time, evidence),
+        signalNoiseRatio: this.updatePercentBelief(previous.kernel.signalNoiseRatio, evidence),
+        emotion: this.updatePercentBelief(previous.kernel.emotion, evidence),
       },
       execution: {
-        confidence: clampPercent(previous.execution.confidence + delta.confidence),
-        fatigue: clampPercent(previous.execution.fatigue + delta.fatigue),
+        confidence: this.updatePercentBelief(previous.execution.confidence, evidence),
+        fatigue: this.updatePercentBelief(previous.execution.fatigue, fatigueEvidence),
       },
     };
   }
 
   transitionFoundationExplorationState(previous: CognitiveState, outcome: InteractionOutcome): CognitiveState {
-    const delta = outcome === 'success'
-      ? { time: 3, signalNoiseRatio: 7, emotion: 5, confidence: 7, fatigue: 1 }
-      : { time: -2, signalNoiseRatio: -3, emotion: -2, confidence: -3, fatigue: 2 };
+    const evidence = outcome === 'success'
+      ? { positive: 1.25, negative: 0.45 }
+      : { positive: 0.45, negative: 1.05 };
+    const fatigueEvidence = outcome === 'success'
+      ? { positive: 0.55, negative: 0.9 }
+      : { positive: 0.85, negative: 0.55 };
 
     return {
       schemaVersion: 'ai-active-v2',
       kernel: {
-        time: clampPercent(previous.kernel.time + delta.time),
-        signalNoiseRatio: clampPercent(previous.kernel.signalNoiseRatio + delta.signalNoiseRatio),
-        emotion: clampPercent(previous.kernel.emotion + delta.emotion),
+        time: this.updatePercentBelief(previous.kernel.time, evidence),
+        signalNoiseRatio: this.updatePercentBelief(previous.kernel.signalNoiseRatio, evidence),
+        emotion: this.updatePercentBelief(previous.kernel.emotion, evidence),
       },
       execution: {
-        confidence: clampPercent(previous.execution.confidence + delta.confidence),
-        fatigue: clampPercent(previous.execution.fatigue + delta.fatigue),
+        confidence: this.updatePercentBelief(previous.execution.confidence, evidence),
+        fatigue: this.updatePercentBelief(previous.execution.fatigue, fatigueEvidence),
       },
     };
   }
@@ -128,16 +138,21 @@ export class StateUpdateEngine {
       return;
     }
 
-    const scoreDelta = snapshot.source === 'foundation-exploration'
-      ? (snapshot.interactionOutcome === 'success' ? 8 : -4)
-      : (snapshot.interactionOutcome === 'success' ? 12 : -8);
-    const confidenceDelta = snapshot.source === 'foundation-exploration'
-      ? (snapshot.interactionOutcome === 'success' ? 0.08 : 0.04)
-      : (snapshot.interactionOutcome === 'success' ? 0.12 : 0.06);
+    const evidence = snapshot.source === 'foundation-exploration'
+      ? (snapshot.interactionOutcome === 'success'
+        ? { positive: 1.35, negative: 0.45 }
+        : { positive: 0.45, negative: 1.05 })
+      : (snapshot.interactionOutcome === 'success'
+        ? { positive: 1.8, negative: 0.35 }
+        : { positive: 0.35, negative: 1.45 });
+    const posterior = updateBetaBelief({
+      mean: percentToProbability(current.score),
+      confidence: current.confidence,
+    }, evidence);
 
     target[key] = {
-      score: clampPercent(current.score + scoreDelta),
-      confidence: clampUnit(current.confidence + confidenceDelta),
+      score: probabilityToPercent(posterior.mean),
+      confidence: clampUnit(posterior.confidence),
       lastEvidenceAt: snapshot.createdAt,
     };
   }
@@ -161,14 +176,35 @@ export class StateUpdateEngine {
       return;
     }
 
-    const scoreDelta = snapshot.source === 'foundation-exploration'
-      ? (snapshot.interactionOutcome === 'failure' ? 8 : -6)
-      : (snapshot.interactionOutcome === 'failure' ? 18 : -12);
+    const evidence = snapshot.source === 'foundation-exploration'
+      ? (snapshot.interactionOutcome === 'failure'
+        ? { positive: 1.15, negative: 0.45 }
+        : { positive: 0.4, negative: 1.15 })
+      : (snapshot.interactionOutcome === 'failure'
+        ? { positive: 1.9, negative: 0.35 }
+        : { positive: 0.35, negative: 1.55 });
+    const posterior = updateBetaBelief({
+      mean: percentToProbability(current.score),
+      confidence: Math.min(0.9, current.evidenceCount / 10 + 0.2),
+    }, evidence);
+
     target[painPoint] = {
-      score: clampPercent(current.score + scoreDelta),
+      score: probabilityToPercent(posterior.mean),
       evidenceCount: current.evidenceCount + 1,
       lastEvidenceAt: snapshot.createdAt,
     };
+  }
+
+  private updatePercentBelief(
+    previousPercent: number,
+    evidence: { positive: number; negative: number },
+  ) {
+    const posterior = updateBetaBelief({
+      mean: percentToProbability(previousPercent),
+      confidence: 0.45,
+    }, evidence, { priorStrength: 7, maxConfidence: 0.8 });
+
+    return probabilityToPercent(posterior.mean);
   }
 
   private collectRecentValues(values: Array<string | undefined>, limit: number) {

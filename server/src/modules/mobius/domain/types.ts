@@ -68,6 +68,10 @@ export interface StrategyCandidate {
   baseScore: number;
   score: number;
   scoreBreakdown: StrategyScoreBreakdown;
+  expectedUtility?: {
+    successProbability: number;
+    utilityBonus: number;
+  };
   rationale: string;
 }
 

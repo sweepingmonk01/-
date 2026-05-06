@@ -7,6 +7,7 @@ import type {
   SocraticMessage,
 } from '../domain/types.js';
 import type { StudentStateVector } from '../../student-state/domain/types.js';
+import { updatePosteriorProbability } from './probabilistic-model.js';
 
 interface BuildHypothesisInput {
   painPoint: string;
@@ -41,7 +42,7 @@ export class HypothesisEngine {
   buildSummary(input: BuildHypothesisInput): HypothesisSummary {
     const generatedAt = new Date().toISOString();
     return this.finalizeSummary({
-      source: 'heuristic-v1',
+      source: 'probabilistic-v1',
       generatedAt,
       candidates: this.rankCandidates(input),
     });
@@ -54,7 +55,7 @@ export class HypothesisEngine {
         const update = this.resolveCandidateUpdate(candidate, reply, input.rule);
         return {
           ...candidate,
-          confidence: clampConfidence(candidate.confidence + update.delta),
+          confidence: clampConfidence(updatePosteriorProbability(candidate.confidence, update.likelihoodRatio)),
           evidence: update.reasons.length > 0
             ? [...candidate.evidence, ...update.reasons].slice(0, 3)
             : candidate.evidence,
@@ -98,7 +99,7 @@ export class HypothesisEngine {
       selectedProbeAction,
       selectedIntervention,
       lastUpdate: {
-        source: 'heuristic-v1',
+        source: 'probabilistic-v1',
         updatedAt: new Date().toISOString(),
         updates,
         selectedHypothesis,
@@ -273,24 +274,31 @@ export class HypothesisEngine {
         ...(hasDirectActionSignal ? ['学生承认自己直接推进，没有先触发规则。'] : []),
         ...(ruleSignal ? ['学生回复中直接提到了应先触发的规则。'] : []),
       ];
-      const delta = (hasDirectActionSignal ? 0.12 : 0) + (ruleSignal && hasFirstStepSignal ? 0.08 : 0) - (hasCueSignal ? 0.04 : 0);
-      return { delta: clampDelta(delta), reasons };
+      const likelihoodRatio =
+        1
+        * (hasDirectActionSignal ? 2.25 : 1)
+        * (ruleSignal && hasFirstStepSignal ? 1.55 : 1)
+        * (hasCueSignal ? 0.82 : 1);
+      const posterior = updatePosteriorProbability(candidate.confidence, likelihoodRatio);
+      return { delta: clampDelta(posterior - candidate.confidence), likelihoodRatio, reasons };
     }
 
     if (candidate.kind === 'cue-missed') {
       const reasons = [
         ...(hasCueSignal ? ['学生把断点定位在题眼/条件识别上。'] : []),
       ];
-      const delta = (hasCueSignal ? 0.18 : 0) - (ruleSignal ? 0.03 : 0);
-      return { delta: clampDelta(delta), reasons };
+      const likelihoodRatio = (hasCueSignal ? 2.6 : 1) * (ruleSignal ? 0.9 : 1);
+      const posterior = updatePosteriorProbability(candidate.confidence, likelihoodRatio);
+      return { delta: clampDelta(posterior - candidate.confidence), likelihoodRatio, reasons };
     }
 
     if (candidate.kind === 'strategy-confusion') {
       const reasons = [
         ...(hasFirstStepSignal ? ['学生开始描述第一步与后续顺序，暴露策略层断点。'] : []),
       ];
-      const delta = hasFirstStepSignal ? 0.11 : 0;
-      return { delta: clampDelta(delta), reasons };
+      const likelihoodRatio = hasFirstStepSignal ? 1.8 : 1;
+      const posterior = updatePosteriorProbability(candidate.confidence, likelihoodRatio);
+      return { delta: clampDelta(posterior - candidate.confidence), likelihoodRatio, reasons };
     }
 
     if (candidate.kind === 'guessing-with-low-monitoring') {
@@ -298,15 +306,17 @@ export class HypothesisEngine {
         ...(hasGuessSignal ? ['学生明确提到猜测式推进。'] : []),
         ...(hasFirstStepSignal && ruleSignal ? ['学生已能复述第一步，猜测风险开始下降。'] : []),
       ];
-      const delta = (hasGuessSignal ? 0.18 : 0) - (hasFirstStepSignal && ruleSignal ? 0.1 : 0);
-      return { delta: clampDelta(delta), reasons };
+      const likelihoodRatio = (hasGuessSignal ? 2.5 : 1) * (hasFirstStepSignal && ruleSignal ? 0.58 : 1);
+      const posterior = updatePosteriorProbability(candidate.confidence, likelihoodRatio);
+      return { delta: clampDelta(posterior - candidate.confidence), likelihoodRatio, reasons };
     }
 
     const reasons = [
       ...(hasKnowledgeSignal ? ['学生直接暴露出规则提取或记忆脆弱。'] : []),
     ];
-    const delta = hasKnowledgeSignal ? 0.17 : 0;
-    return { delta: clampDelta(delta), reasons };
+    const likelihoodRatio = hasKnowledgeSignal ? 2.35 : 1;
+    const posterior = updatePosteriorProbability(candidate.confidence, likelihoodRatio);
+    return { delta: clampDelta(posterior - candidate.confidence), likelihoodRatio, reasons };
   }
 
   private buildIntervention(

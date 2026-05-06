@@ -134,7 +134,7 @@ export interface HypothesisCandidate {
 }
 
 export interface HypothesisSummary {
-  source: 'heuristic-v1';
+  source: 'heuristic-v1' | 'probabilistic-v1';
   generatedAt: string;
   candidates: HypothesisCandidate[];
   selectedHypothesis?: HypothesisCandidate;
@@ -161,7 +161,7 @@ export interface HypothesisIntervention {
 }
 
 export interface HypothesisUpdateResult {
-  source: 'heuristic-v1';
+  source: 'heuristic-v1' | 'probabilistic-v1';
   updatedAt: string;
   updates: HypothesisConfidenceUpdate[];
   selectedHypothesis?: HypothesisCandidate;

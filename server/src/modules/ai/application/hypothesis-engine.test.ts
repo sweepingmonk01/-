@@ -11,7 +11,7 @@ test('HypothesisEngine generates, updates, and selects an intervention from stud
     messages: [],
   });
 
-  assert.equal(summary.source, 'heuristic-v1');
+  assert.equal(summary.source, 'probabilistic-v1');
   assert.ok(summary.candidates.length >= 1);
   assert.equal(summary.selectedHypothesis?.id, 'rule-not-triggered');
   assert.equal(summary.selectedIntervention?.type, 'probe');

@@ -55,7 +55,7 @@ test('SocraticDiagnosticService closes after three user turns', async () => {
   assert.equal(thread.messages.length, 1);
   assert.match(thread.messages[0]?.content ?? '', /当前最高风险猜想/);
   assert.match(thread.messages[0]?.content ?? '', /图谱热点命中/);
-  assert.equal(thread.hypothesisSummary?.source, 'heuristic-v1');
+  assert.equal(thread.hypothesisSummary?.source, 'probabilistic-v1');
   assert.ok(thread.hypothesisSummary?.selectedHypothesis);
 
   const reply1 = await service.reply(thread.id, '我第一眼没看到分母不一样。');

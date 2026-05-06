@@ -147,13 +147,16 @@ test('StrategicPlannerService merges model ROI output with ranked weak-topic ale
     imageBase64: pngBase64(900, 2400),
     mimeType: 'image/png',
   });
+  const currentVector = await stateVectors.getCurrentVector('student-a');
+  const mixedEvidenceScore = currentVector?.errorBeliefs['英语时态']?.score ?? 0;
 
   assert.equal(capturedTargetScore, 123);
+  assert.ok(mixedEvidenceScore > 0 && mixedEvidenceScore < 50);
   assert.deepEqual(result.strategicPlan?.weakTopicAlerts, [
     '模型识别：审题速度不稳',
     '几何辅助线 历史失败率约 100%',
     '倍长中线 相邻于 几何辅助线，建议连带修复',
-    '英语时态 风险信号 6/100',
+    '英语时态 风险信号 24/100',
   ]);
   assert.deepEqual(result.strategicPlan?.focusKnowledgePoints, [
     '几何辅助线',

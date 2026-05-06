@@ -87,6 +87,10 @@ export interface StrategyCandidate {
   baseScore: number;
   score: number;
   scoreBreakdown: StrategyScoreBreakdown;
+  expectedUtility?: {
+    successProbability: number;
+    utilityBonus: number;
+  };
   rationale: string;
 }
 
@@ -227,7 +231,7 @@ export interface HypothesisIntervention {
 }
 
 export interface HypothesisUpdateResult {
-  source: 'heuristic-v1';
+  source: 'heuristic-v1' | 'probabilistic-v1';
   updatedAt: string;
   updates: HypothesisConfidenceUpdate[];
   selectedHypothesis?: HypothesisCandidate;
@@ -236,7 +240,7 @@ export interface HypothesisUpdateResult {
 }
 
 export interface HypothesisSummary {
-  source: 'heuristic-v1';
+  source: 'heuristic-v1' | 'probabilistic-v1';
   generatedAt: string;
   candidates: HypothesisCandidate[];
   selectedHypothesis?: HypothesisCandidate;

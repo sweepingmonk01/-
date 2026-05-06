@@ -6,6 +6,26 @@ import type { StrategyCandidate, StrategyDecision, StrategyKind } from '../../mo
 
 export type LearningCycleSource = 'mobius-session' | 'foundation-science-exploration';
 export type LearningCycleStatus = 'started' | 'validated' | 'diagnosed' | 'closed';
+export type LearningEvidenceModality = 'text' | 'image' | 'interaction' | 'graph' | 'diagnosis' | 'transfer';
+export type LearningEvidencePrivacyLevel = 'local' | 'server' | 'redacted';
+
+export interface LearningEvidenceEvent {
+  id: string;
+  studentId: string;
+  cycleId?: string;
+  modality: LearningEvidenceModality;
+  source: string;
+  targetNodeKey?: string;
+  painPoint?: string;
+  rule?: string;
+  confidence: number;
+  observedAt: string;
+  outcome?: InteractionOutcome | 'partial';
+  modelVersion?: string;
+  privacyLevel: LearningEvidencePrivacyLevel;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
 
 export interface LearningCycleRecord {
   id: string;
@@ -32,6 +52,17 @@ export interface LearningCycleRecord {
   createdAt: string;
   updatedAt: string;
   closedAt?: string;
+}
+
+export interface LearningModelEvaluation {
+  completedPredictions: number;
+  averageBrierScore: number;
+  calibrationBuckets: Array<{
+    bucket: string;
+    count: number;
+    averagePredicted: number;
+    actualSuccessRate: number;
+  }>;
 }
 
 export type LearningCycleEventType =

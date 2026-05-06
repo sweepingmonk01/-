@@ -2,7 +2,12 @@ import { mkdirSync } from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { DatabaseSync } from 'node:sqlite';
-import type { LearningCycleEvent, LearningCycleEventType, LearningCycleRecord } from '../domain/types.js';
+import type {
+  LearningCycleEvent,
+  LearningCycleEventType,
+  LearningCycleRecord,
+  LearningEvidenceEvent,
+} from '../domain/types.js';
 
 interface SQLiteLearningCycleRepositoryOptions {
   dbFile: string;
@@ -34,6 +39,24 @@ interface LearningCycleEventRow {
   cycle_id: string;
   event_type: LearningCycleEventType;
   event_payload_json: string | null;
+  created_at: string;
+}
+
+interface LearningEvidenceEventRow {
+  id: string;
+  student_id: string;
+  cycle_id: string | null;
+  modality: LearningEvidenceEvent['modality'];
+  source: string;
+  target_node_key: string | null;
+  pain_point: string | null;
+  rule_text: string | null;
+  confidence: number;
+  observed_at: string;
+  outcome: LearningEvidenceEvent['outcome'] | null;
+  model_version: string | null;
+  privacy_level: LearningEvidenceEvent['privacyLevel'];
+  payload_json: string;
   created_at: string;
 }
 
@@ -78,6 +101,28 @@ export class SQLiteLearningCycleRepository {
       );
       CREATE INDEX IF NOT EXISTS idx_learning_cycle_events_cycle_created
       ON learning_cycle_events (cycle_id, created_at ASC);
+
+      CREATE TABLE IF NOT EXISTS learning_evidence_events (
+        id TEXT PRIMARY KEY,
+        student_id TEXT NOT NULL,
+        cycle_id TEXT,
+        modality TEXT NOT NULL,
+        source TEXT NOT NULL,
+        target_node_key TEXT,
+        pain_point TEXT,
+        rule_text TEXT,
+        confidence REAL NOT NULL,
+        observed_at TEXT NOT NULL,
+        outcome TEXT,
+        model_version TEXT,
+        privacy_level TEXT NOT NULL,
+        payload_json TEXT NOT NULL,
+        created_at TEXT NOT NULL
+      );
+      CREATE INDEX IF NOT EXISTS idx_learning_evidence_student_observed
+      ON learning_evidence_events (student_id, observed_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_learning_evidence_cycle_observed
+      ON learning_evidence_events (cycle_id, observed_at ASC);
     `);
   }
 
@@ -235,6 +280,62 @@ export class SQLiteLearningCycleRepository {
     }));
   }
 
+  async appendEvidence(input: Omit<LearningEvidenceEvent, 'id' | 'createdAt'>): Promise<LearningEvidenceEvent> {
+    const evidence: LearningEvidenceEvent = {
+      id: randomUUID(),
+      createdAt: new Date().toISOString(),
+      ...input,
+      confidence: Math.max(0, Math.min(1, Number(input.confidence.toFixed(4)))),
+    };
+
+    this.db.prepare(`
+      INSERT INTO learning_evidence_events (
+        id, student_id, cycle_id, modality, source, target_node_key,
+        pain_point, rule_text, confidence, observed_at, outcome, model_version,
+        privacy_level, payload_json, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      evidence.id,
+      evidence.studentId,
+      evidence.cycleId ?? null,
+      evidence.modality,
+      evidence.source,
+      evidence.targetNodeKey ?? null,
+      evidence.painPoint ?? null,
+      evidence.rule ?? null,
+      evidence.confidence,
+      evidence.observedAt,
+      evidence.outcome ?? null,
+      evidence.modelVersion ?? null,
+      evidence.privacyLevel,
+      JSON.stringify(evidence.payload),
+      evidence.createdAt,
+    );
+
+    return evidence;
+  }
+
+  async listEvidenceByCycle(cycleId: string): Promise<LearningEvidenceEvent[]> {
+    const rows = this.db.prepare(`
+      SELECT * FROM learning_evidence_events
+      WHERE cycle_id = ?
+      ORDER BY observed_at ASC, created_at ASC
+    `).all(cycleId) as unknown as LearningEvidenceEventRow[];
+
+    return rows.map((row) => this.mapEvidenceRow(row));
+  }
+
+  async listEvidenceByStudent(studentId: string, limit: number = 100): Promise<LearningEvidenceEvent[]> {
+    const rows = this.db.prepare(`
+      SELECT * FROM learning_evidence_events
+      WHERE student_id = ?
+      ORDER BY observed_at DESC, created_at DESC
+      LIMIT ?
+    `).all(studentId, limit) as unknown as LearningEvidenceEventRow[];
+
+    return rows.map((row) => this.mapEvidenceRow(row));
+  }
+
   private mapRow(row: LearningCycleRow): LearningCycleRecord {
     return {
       id: row.id,
@@ -259,6 +360,26 @@ export class SQLiteLearningCycleRepository {
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       closedAt: row.closed_at ?? undefined,
+    };
+  }
+
+  private mapEvidenceRow(row: LearningEvidenceEventRow): LearningEvidenceEvent {
+    return {
+      id: row.id,
+      studentId: row.student_id,
+      cycleId: row.cycle_id ?? undefined,
+      modality: row.modality,
+      source: row.source,
+      targetNodeKey: row.target_node_key ?? undefined,
+      painPoint: row.pain_point ?? undefined,
+      rule: row.rule_text ?? undefined,
+      confidence: row.confidence,
+      observedAt: row.observed_at,
+      outcome: row.outcome ?? undefined,
+      modelVersion: row.model_version ?? undefined,
+      privacyLevel: row.privacy_level,
+      payload: JSON.parse(row.payload_json) as Record<string, unknown>,
+      createdAt: row.created_at,
     };
   }
 }
