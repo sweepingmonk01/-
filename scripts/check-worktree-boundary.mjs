@@ -45,6 +45,7 @@ const shouldCommitPatterns = [
   'scripts/check-bundle-budget.mjs',
   'scripts/check-worktree-boundary.mjs',
   'scripts/smoke-local.mjs',
+  'index.html',
   'app/assets/branding/',
   'app/assets/foundation-science/',
   'app/assets/visual-language/',
@@ -91,7 +92,6 @@ const deferredFromFeaturePrPatterns = [
   'firebase-applet-config.json',
   'firebase-blueprint.json',
   'firestore.rules',
-  'index.html',
   'metadata.json',
 ];
 

@@ -50,6 +50,45 @@ Use `npm run smoke:local` before handing a branch to QA. It starts the unified s
 - Demo header auth is disabled by default when `NODE_ENV=production`; explicitly set `MOBIUS_DEMO_MODE_ENABLED=true` only for controlled demo deployments.
 - Explore remote sync ignores client-supplied `userId`/`studentId` as authority and binds reads/writes to the authenticated student.
 
+## Production Deployment
+
+**Runtime:** Node.js 22
+
+1. Install dependencies with locked versions:
+
+   ```bash
+   npm ci
+   ```
+
+2. Build the frontend bundle:
+
+   ```bash
+   npm run build
+   ```
+
+3. Start the unified production server:
+
+   ```bash
+   NODE_ENV=production npm run dev
+   ```
+
+   The server reads `MOBIUS_SERVER_PORT` first and falls back to `PORT`, defaulting to `3000`.
+
+4. Configure runtime storage and health checks:
+   `MOBIUS_SQLITE_DB_FILE` controls the SQLite database path. Point it to a persistent writable location in production. Use `/api/health/ready` for readiness checks.
+
+5. Inject production environment variables from the deployment platform:
+   Do not rely on `.env.local` in production. Set secrets and runtime config in the host platform instead.
+
+6. Configure external providers only when the related feature must be live:
+   `DEEPSEEK_API_KEY` for DeepSeek AI requests.
+   `MOBIUS_FIREBASE_PROJECT_ID` or `FIREBASE_PROJECT_ID` for Firebase token verification.
+   `OPENAI_API_KEY` for OpenAI image generation; without it the image asset flow falls back to a stub.
+   `SEEDANCE_API_KEY` and `SEEDANCE_BASE_URL` for Seedance HTTP video generation; without them video generation stays on the stub path.
+
+7. Keep rollback simple:
+   Preserve the previous built release artifact or deploy from the previous Git tag so the service can be reverted without rebuilding under pressure.
+
 ## Data And Generated Files
 
 - SQLite runtime data belongs under `server/data/` and is ignored.

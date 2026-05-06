@@ -5,7 +5,10 @@ import path from 'path';
 import { createMobiusApp } from './src/app.js';
 import { getServerEnv } from './src/config/env.js';
 
-loadEnv({ path: '.env.local' });
+// In production, env vars should come from the deployment platform instead of a local override file.
+if (process.env.NODE_ENV !== 'production') {
+  loadEnv({ path: '.env.local' });
+}
 loadEnv();
 
 async function startServer() {
@@ -32,6 +35,12 @@ async function startServer() {
     // Production static delivery
     const distPath = path.join(process.cwd(), 'dist');
     app.use(express.static(distPath));
+    app.use('/api', (_req, res) => {
+      res.status(404).json({
+        error: 'not_found',
+        message: 'API route not found',
+      });
+    });
     app.get('*', (req, res) => {
       res.sendFile(path.join(distPath, 'index.html'));
     });
