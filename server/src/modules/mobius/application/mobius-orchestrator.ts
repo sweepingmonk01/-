@@ -12,6 +12,7 @@ import type {
   StudentContext,
 } from '../domain/types.js';
 import { LearningCycleService } from '../../analytics/application/learning-cycle-service.js';
+import type { KnowledgeGraphDecisionContext } from '../../ai/domain/types.js';
 import type { StudentStateRepository } from '../../student-state/domain/ports.js';
 import { StateUpdateEngine } from '../../student-state/application/state-update-engine.js';
 import { StateVectorService } from '../../student-state/application/state-vector-service.js';
@@ -26,6 +27,14 @@ interface MobiusOrchestratorDeps {
   updateEngine: StateUpdateEngine;
   strategyScheduler: StrategyScheduler;
   learningCycles: LearningCycleService;
+  graphContextProvider?: {
+    getDecisionContext(input: {
+      studentId: string;
+      painPoint?: string;
+      rule?: string;
+      questionText?: string;
+    }): Promise<KnowledgeGraphDecisionContext>;
+  };
 }
 
 export class MobiusOrchestrator {
@@ -37,10 +46,12 @@ export class MobiusOrchestrator {
       context.learningSignals,
       context.previousState ?? priorVector?.cognitive,
     );
+    const graphDecisionContext = await this.resolveGraphDecisionContext(context);
     const strategyDecision = this.deps.strategyScheduler.decide({
       context,
       cognitiveState,
       stateVector: priorVector,
+      graphDecisionContext,
     });
     const story = await this.deps.storyPlanner.plan(context, cognitiveState, strategyDecision);
     const promptBundle = this.buildSeedancePrompt(context, story, cognitiveState);
@@ -89,6 +100,7 @@ export class MobiusOrchestrator {
         emotion: story.emotion,
         selectedStrategy: story.strategyDecision.selectedStrategy,
         strategyCandidates: story.strategyDecision.candidates,
+        graphDecisionContext,
       },
     });
 
@@ -492,11 +504,28 @@ export class MobiusOrchestrator {
     stateVector: Awaited<ReturnType<StateVectorService['getCurrentVector']>>,
   ): Promise<StrategyDecision> {
     const cycle = await this.deps.learningCycles.getCycleByMediaJobId(job.id);
+    const context = this.buildStrategyContext(job, cycle);
+    const graphDecisionContext = await this.resolveGraphDecisionContext({
+      ...context,
+      questionText: job.promptBundle.prompt,
+    });
 
     return this.deps.strategyScheduler.decide({
-      context: this.buildStrategyContext(job, cycle),
+      context,
       cognitiveState,
       stateVector: stateVector ?? undefined,
+      graphDecisionContext,
+    });
+  }
+
+  private async resolveGraphDecisionContext(context: StudentContext): Promise<KnowledgeGraphDecisionContext | undefined> {
+    if (!this.deps.graphContextProvider) return undefined;
+
+    return this.deps.graphContextProvider.getDecisionContext({
+      studentId: context.studentId,
+      painPoint: context.painPoint,
+      rule: context.rule,
+      questionText: context.questionText,
     });
   }
 

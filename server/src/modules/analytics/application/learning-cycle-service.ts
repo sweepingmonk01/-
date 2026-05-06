@@ -258,6 +258,28 @@ export class LearningCycleService {
         },
       });
     }
+    if (cycle.selectedAction?.graphDecisionContext?.priorSignals.length) {
+      const strongestPrior = cycle.selectedAction.graphDecisionContext.priorSignals[0];
+      await this.repository.appendEvidence({
+        studentId: cycle.studentId,
+        cycleId: cycle.id,
+        modality: 'graph',
+        source: 'graph.prior.applied',
+        targetNodeKey: strongestPrior.key,
+        painPoint: cycle.painPoint,
+        rule: cycle.rule,
+        confidence: strongestPrior.probability,
+        observedAt: cycle.createdAt,
+        modelVersion: 'graph-prior-v1',
+        privacyLevel: 'server',
+        payload: {
+          priorSignals: cycle.selectedAction.graphDecisionContext.priorSignals,
+          matchedHotspots: cycle.selectedAction.graphDecisionContext.matchedHotspots,
+          neighborRecommendations: cycle.selectedAction.graphDecisionContext.neighborRecommendations,
+          summary: cycle.selectedAction.graphDecisionContext.summary,
+        },
+      });
+    }
 
     return cycle;
   }

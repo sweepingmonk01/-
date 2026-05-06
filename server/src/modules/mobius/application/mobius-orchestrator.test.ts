@@ -41,6 +41,22 @@ test('MobiusOrchestrator builds a session with structured error profile', async 
     updateEngine: stateUpdateEngine,
     strategyScheduler: new ScoredStrategyScheduler(),
     learningCycles,
+    graphContextProvider: {
+      getDecisionContext: async () => ({
+        topHotspots: [{ key: 'geom-midpoint', label: '几何辅助线', weight: 4 }],
+        matchedHotspots: [{ key: 'geom-midpoint', label: '几何辅助线', weight: 4 }],
+        neighborRecommendations: [{
+          key: 'geom-extend-midline',
+          label: '倍长中线',
+          weight: 2,
+          relationWeight: 9,
+          anchorKey: 'geom-midpoint',
+          anchorLabel: '几何辅助线',
+        }],
+        priorSignals: [{ key: 'geom-midpoint', label: '几何辅助线', weight: 4, kind: 'matched-hotspot', probability: 0.84 }],
+        summary: ['图谱热点命中：几何辅助线', '相邻修复建议：倍长中线 <- 几何辅助线'],
+      }),
+    },
   });
 
   const session = await orchestrator.buildSession({
@@ -82,6 +98,8 @@ test('MobiusOrchestrator builds a session with structured error profile', async 
   assert.equal(session.story.strategyDecision.candidates.length, 3);
   assert.equal(session.story.strategyDecision.selectedStrategy, 'probe');
   assert.ok(session.story.strategyDecision.candidates[0]?.scoreBreakdown.painPointRecurrence.contribution >= 0);
+  assert.ok(session.story.strategyDecision.candidates[0]?.scoreBreakdown.graphPriorPressure.value > 0);
+  assert.equal(session.story.strategyDecision.candidates[0]?.scoreBreakdown.graphPriorPressure.label, '图谱先验');
 
   const sessionJob = await orchestrator.getMediaJob(session.video.jobId!);
   assert.ok(sessionJob);
@@ -110,6 +128,14 @@ test('MobiusOrchestrator builds a session with structured error profile', async 
   assert.ok(latestSnapshot);
   assert.equal(latestSnapshot.source, 'session-created');
   assert.equal(latestSnapshot.profile.rule, '遇中点，先想倍长中线；造全等比硬算更稳。');
+
+  const report = await learningCycles.getCycleReport('student-2', session.cycleId);
+  assert.equal(report?.flow.selectedAction?.graphDecisionContext?.priorSignals[0]?.label, '几何辅助线');
+  assert.ok(report?.flow.evidence.some((item) =>
+    item.modality === 'graph'
+    && item.source === 'graph.prior.applied'
+    && item.targetNodeKey === 'geom-midpoint',
+  ));
 });
 
 test('MobiusOrchestrator adjudicates structured interaction submissions', async () => {

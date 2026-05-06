@@ -80,6 +80,22 @@ const strategyPolicyFeatures: StrategyPolicyFeatureDefinition[] = [
     },
   },
   {
+    key: 'graphPriorPressure',
+    label: '图谱先验',
+    resolve: (input) => {
+      const strongestPrior = input.graphDecisionContext?.priorSignals[0]?.probability;
+
+      return typeof strongestPrior === 'number'
+        ? Math.round(strongestPrior * 24)
+        : 0;
+    },
+    weights: {
+      probe: 0.6,
+      teach: 1,
+      review: -0.4,
+    },
+  },
+  {
     key: 'recentFailurePressure',
     label: '近期失败压力',
     resolve: (input) => Math.min(24, (input.stateVector?.sessionContext.recentFailureCount ?? 0) * 6),

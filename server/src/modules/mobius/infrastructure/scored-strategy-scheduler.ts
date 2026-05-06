@@ -62,21 +62,22 @@ export class ScoredStrategyScheduler implements StrategyScheduler {
     const noisePressure = breakdown.noisePressure.value / 26;
     const emotionRisk = breakdown.emotionRisk.value / 22;
     const timePressure = breakdown.timePressure.value / 24;
+    const graphPriorPressure = breakdown.graphPriorPressure.value / 24;
     const fatigue = percentToProbability(input.cognitiveState.execution.fatigue);
     const confidence = percentToProbability(input.cognitiveState.execution.confidence);
 
     const prior =
       strategy === 'probe'
-        ? 0.5 + noisePressure * 0.18 + masteryGap * 0.08
+        ? 0.5 + noisePressure * 0.18 + masteryGap * 0.08 + graphPriorPressure * 0.1
         : strategy === 'teach'
-        ? 0.45 + failurePressure * 0.2 + masteryGap * 0.18 + emotionRisk * 0.12
-        : 0.48 + successRecovery * 0.22 + confidence * 0.12;
+        ? 0.45 + failurePressure * 0.2 + masteryGap * 0.18 + emotionRisk * 0.12 + graphPriorPressure * 0.18
+        : 0.48 + successRecovery * 0.22 + confidence * 0.12 - graphPriorPressure * 0.08;
     const cost =
       strategy === 'probe'
         ? timePressure * 0.16 + fatigue * 0.08
-        : strategy === 'teach'
+      : strategy === 'teach'
         ? timePressure * 0.2 + fatigue * 0.12
-        : masteryGap * 0.12 + noisePressure * 0.08;
+        : masteryGap * 0.12 + noisePressure * 0.08 + graphPriorPressure * 0.05;
     const calibratedSuccess = sigmoid(logit(prior) - cost);
     const utility = calibratedSuccess - cost;
 

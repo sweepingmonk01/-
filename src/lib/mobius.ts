@@ -70,6 +70,7 @@ export type StrategyFeatureKey =
   | 'noisePressure'
   | 'emotionRisk'
   | 'masteryGap'
+  | 'graphPriorPressure'
   | 'recentFailurePressure'
   | 'recentSuccessRecovery';
 
@@ -296,10 +297,16 @@ export interface KnowledgeGraphDecisionNode {
   anchorLabel?: string;
 }
 
+export interface KnowledgeGraphPriorSignal extends KnowledgeGraphDecisionNode {
+  kind: 'matched-hotspot' | 'neighbor' | 'top-hotspot';
+  probability: number;
+}
+
 export interface KnowledgeGraphDecisionContext {
   topHotspots: KnowledgeGraphDecisionNode[];
   matchedHotspots: KnowledgeGraphDecisionNode[];
   neighborRecommendations: KnowledgeGraphDecisionNode[];
+  priorSignals: KnowledgeGraphPriorSignal[];
   summary: string[];
 }
 

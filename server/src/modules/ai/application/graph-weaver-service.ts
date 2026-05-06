@@ -6,6 +6,7 @@ import type {
   KnowledgeGraphDecisionNode,
   KnowledgeGraphEdge,
   KnowledgeGraphNode,
+  KnowledgeGraphPriorSignal,
 } from '../domain/types.js';
 import { DeepSeekCoachService } from './deepseek-coach-service.js';
 import { SQLiteKnowledgeGraphRepository } from '../infrastructure/sqlite-knowledge-graph-repository.js';
@@ -43,6 +44,7 @@ export class GraphWeaverService {
         topHotspots,
         matchedHotspots: [],
         neighborRecommendations: [],
+        priorSignals: [],
         summary: [],
       };
     }
@@ -59,6 +61,11 @@ export class GraphWeaverService {
 
     const anchors = matchedHotspots.length ? matchedHotspots : topHotspots.slice(0, 1);
     const neighborRecommendations = this.buildNeighborRecommendations(graph.nodes, graph.edges, anchors);
+    const priorSignals = this.buildPriorSignals({
+      matchedHotspots,
+      neighborRecommendations,
+      topHotspots,
+    });
 
     const summary: string[] = [];
     if (matchedHotspots.length) {
@@ -76,6 +83,7 @@ export class GraphWeaverService {
       topHotspots,
       matchedHotspots,
       neighborRecommendations,
+      priorSignals,
       summary,
     };
   }
@@ -190,9 +198,52 @@ export class GraphWeaverService {
       .sort((left, right) => (right.relationWeight ?? 0) - (left.relationWeight ?? 0) || right.weight - left.weight)
       .slice(0, 3);
   }
+
+  private buildPriorSignals(input: {
+    matchedHotspots: KnowledgeGraphDecisionNode[];
+    neighborRecommendations: KnowledgeGraphDecisionNode[];
+    topHotspots: KnowledgeGraphDecisionNode[];
+  }): KnowledgeGraphPriorSignal[] {
+    const signals = new Map<string, KnowledgeGraphPriorSignal>();
+    const addSignal = (signal: KnowledgeGraphPriorSignal) => {
+      const existing = signals.get(signal.key);
+      if (existing && existing.probability >= signal.probability) return;
+      signals.set(signal.key, signal);
+    };
+
+    for (const node of input.matchedHotspots) {
+      addSignal({
+        ...node,
+        kind: 'matched-hotspot',
+        probability: clampPriorProbability(0.52 + node.weight * 0.08),
+      });
+    }
+
+    for (const node of input.neighborRecommendations) {
+      addSignal({
+        ...node,
+        kind: 'neighbor',
+        probability: clampPriorProbability(0.42 + (node.relationWeight ?? node.weight) * 0.04),
+      });
+    }
+
+    for (const node of input.topHotspots.slice(0, 2)) {
+      addSignal({
+        ...node,
+        kind: 'top-hotspot',
+        probability: clampPriorProbability(0.35 + node.weight * 0.06),
+      });
+    }
+
+    return [...signals.values()]
+      .sort((left, right) => right.probability - left.probability || right.weight - left.weight)
+      .slice(0, 5);
+  }
 }
 
 const normalizeText = (value: string) => value.trim().toLowerCase();
+
+const clampPriorProbability = (value: number) => Math.max(0.05, Math.min(0.92, Number(value.toFixed(2))));
 
 const textMatches = (corpus: string, label: string) => {
   const normalizedLabel = normalizeText(label);

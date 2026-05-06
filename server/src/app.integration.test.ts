@@ -459,13 +459,23 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
         cycleId?: string;
         strategyDecision?: { selectedStrategy?: string };
         video?: { jobId?: string };
-        story?: { strategyDecision?: { selectedStrategy?: string; candidates?: unknown[] } };
+        story?: {
+          strategyDecision?: {
+            selectedStrategy?: string;
+            candidates?: Array<{
+              scoreBreakdown?: {
+                graphPriorPressure?: { value?: number };
+              };
+            }>;
+          };
+        };
       };
       assert.ok(session.cycleId);
       assert.ok(session.video?.jobId);
-      assert.equal(session.strategyDecision?.selectedStrategy, 'probe');
-      assert.equal(session.story?.strategyDecision?.selectedStrategy, 'probe');
+      assert.equal(session.strategyDecision?.selectedStrategy, 'teach');
+      assert.equal(session.story?.strategyDecision?.selectedStrategy, 'teach');
       assert.equal(session.story?.strategyDecision?.candidates?.length, 3);
+      assert.ok((session.story?.strategyDecision?.candidates?.[0]?.scoreBreakdown?.graphPriorPressure?.value ?? 0) > 0);
 
       const failureResponse = await fetch(`${baseUrl}/api/mobius/media-jobs/${session.video.jobId}/interactions`, {
         method: 'POST',
@@ -512,9 +522,10 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
       assert.equal(cycle.id, session.cycleId);
       assert.equal(cycle.outcome, 'failure');
       assert.ok(cycle.stateAfter);
-      assert.equal(cycle.selectedAction?.selectedStrategy, 'probe');
+      assert.equal(cycle.selectedAction?.selectedStrategy, 'teach');
       assert.equal(cycle.selectedAction?.strategyCandidates?.length, 3);
       assert.ok(cycle.selectedAction?.strategyCandidates?.[0]?.expectedUtility?.successProbability);
+      assert.ok((cycle.selectedAction?.strategyCandidates?.[0]?.scoreBreakdown.graphPriorPressure.value ?? 0) > 0);
       assert.equal(cycle.hypothesisSummary?.source, 'probabilistic-v1');
       assert.ok(Array.isArray(cycle.hypothesisSummary?.candidates));
 
@@ -592,7 +603,7 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
           selectedAction?: { selectedStrategy?: string };
           result: { outcome?: string; effectScore?: number; status: string };
           stateAfter?: unknown;
-          evidence: Array<{ source: string; modality: string; outcome?: string }>;
+          evidence: Array<{ source: string; modality: string; outcome?: string; targetNodeKey?: string }>;
           events: Array<{ eventType: string }>;
         };
       };
@@ -602,8 +613,10 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
       assert.ok(cycleReport.flow.stateBefore);
       assert.ok(cycleReport.flow.stateAfter);
       assert.ok(cycleReport.flow.hypothesis);
-      assert.equal(cycleReport.flow.selectedAction?.selectedStrategy, 'probe');
+      assert.equal(cycleReport.flow.selectedAction?.selectedStrategy, 'teach');
       assert.ok(cycleReport.flow.evidence.some((item) => item.source === 'mobius.state.prior'));
+      assert.ok(cycleReport.flow.evidence.some((item) =>
+        item.modality === 'graph' && item.source === 'graph.prior.applied' && item.targetNodeKey));
       assert.ok(cycleReport.flow.evidence.some((item) =>
         item.source === 'mobius.interaction.outcome' && item.outcome === 'failure'));
       assert.ok(cycleReport.flow.evidence.some((item) => item.source === 'hypothesis.posterior'));

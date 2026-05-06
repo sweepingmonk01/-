@@ -137,6 +137,7 @@ test('StrategicPlannerService merges model ROI output with ranked weak-topic ale
           anchorKey: 'geom-midpoint',
           anchorLabel: '几何辅助线',
         }],
+        priorSignals: [{ key: 'geom-midpoint', label: '几何辅助线', weight: 4, kind: 'matched-hotspot', probability: 0.84 }],
         summary: ['图谱热点命中：几何辅助线', '相邻修复建议：倍长中线 <- 几何辅助线'],
       }),
     } as any,

@@ -110,24 +110,6 @@ export const createMobiusApp = () => {
     updateEngine: stateUpdateEngine,
   });
 
-  const orchestrator = new MobiusOrchestrator({
-    cognitiveEngine: new ProbabilisticCognitiveEngine(),
-    storyPlanner: new HeuristicStoryPlanner(),
-    videoClient,
-    mediaJobs,
-    studentStates,
-    stateVectors: stateVectorService,
-    updateEngine: stateUpdateEngine,
-    strategyScheduler: new ScoredStrategyScheduler(),
-    learningCycles,
-  });
-
-  const studentStateSummaryService = new StudentStateSummaryService({
-    repository: studentStates,
-    stateVectors: stateVectorService,
-  });
-  const studentStateController = new StudentStateController(studentStateSummaryService);
-  
   // Setup sqlite profile repo regardless of purely file configurations since DB must be resilient
   const profileRepo = new SQLiteStudentProfileRepository({
     dbFile: path.resolve(env.sqliteDbFile),
@@ -159,6 +141,23 @@ export const createMobiusApp = () => {
     agentJobs: agentJobRepository,
     errorRecords: profileRepo,
   });
+  const orchestrator = new MobiusOrchestrator({
+    cognitiveEngine: new ProbabilisticCognitiveEngine(),
+    storyPlanner: new HeuristicStoryPlanner(),
+    videoClient,
+    mediaJobs,
+    studentStates,
+    stateVectors: stateVectorService,
+    updateEngine: stateUpdateEngine,
+    strategyScheduler: new ScoredStrategyScheduler(),
+    learningCycles,
+    graphContextProvider: graphWeaverService,
+  });
+  const studentStateSummaryService = new StudentStateSummaryService({
+    repository: studentStates,
+    stateVectors: stateVectorService,
+  });
+  const studentStateController = new StudentStateController(studentStateSummaryService);
   const strategicPlannerService = coachService ? new StrategicPlannerService({
     coachService,
     profileRepo,

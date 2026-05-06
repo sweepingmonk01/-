@@ -40,6 +40,7 @@ test('SocraticDiagnosticService closes after three user turns', async () => {
         topHotspots: [{ key: 'fraction-lcm', label: '最小公倍数', weight: 3 }],
         matchedHotspots: [{ key: 'fraction-common-denominator', label: '分母不一致', weight: 2 }],
         neighborRecommendations: [{ key: 'fraction-lcm', label: '最小公倍数', weight: 3, relationWeight: 8, anchorKey: 'fraction-common-denominator', anchorLabel: '分母不一致' }],
+        priorSignals: [{ key: 'fraction-common-denominator', label: '分母不一致', weight: 2, kind: 'matched-hotspot', probability: 0.68 }],
         summary: ['图谱热点命中：分母不一致', '相邻修复建议：最小公倍数 <- 分母不一致'],
       }),
     } as any,

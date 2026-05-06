@@ -1,5 +1,5 @@
 import type { DiagnosedMistakePattern, ErrorRecord, KnowledgeAction } from '../../learning/domain/protocol.js';
-import type { SocraticThread } from '../../ai/domain/types.js';
+import type { KnowledgeGraphDecisionContext, SocraticThread } from '../../ai/domain/types.js';
 import type { StudentStateVector } from '../../student-state/domain/types.js';
 import type {
   CognitiveState,
@@ -51,6 +51,7 @@ export type StrategyFeatureKey =
   | 'noisePressure'
   | 'emotionRisk'
   | 'masteryGap'
+  | 'graphPriorPressure'
   | 'recentFailurePressure'
   | 'recentSuccessRecovery';
 
@@ -84,6 +85,7 @@ export interface StrategySchedulerInput {
   context: StudentContext;
   cognitiveState: CognitiveState;
   stateVector?: StudentStateVector | null;
+  graphDecisionContext?: KnowledgeGraphDecisionContext;
 }
 
 export type InteractionOutcome = 'success' | 'failure';
