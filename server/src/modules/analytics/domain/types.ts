@@ -1,4 +1,4 @@
-import type { CognitiveState, InteractionOutcome, InteractionSubmission } from '../../mobius/domain/types.js';
+import type { CognitiveState, InteractionOutcome, InteractionSubmission, LearningSignalInput } from '../../mobius/domain/types.js';
 import type { KnowledgeAction } from '../../learning/domain/protocol.js';
 import type { StudentStateVector } from '../../student-state/domain/types.js';
 import type { HypothesisSummary, KnowledgeGraphDecisionContext } from '../../ai/domain/types.js';
@@ -95,6 +95,7 @@ export interface StartLearningCycleInput {
   knowledgeActionId?: string;
   stateBefore: CognitiveState;
   stateVectorBefore?: StudentStateVector;
+  learningSignals?: LearningSignalInput;
   selectedAction?: LearningCycleRecord['selectedAction'];
 }
 

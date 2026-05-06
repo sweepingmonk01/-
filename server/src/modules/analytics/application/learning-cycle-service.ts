@@ -1,4 +1,4 @@
-import type { CognitiveState } from '../../mobius/domain/types.js';
+import type { CognitiveState, LearningSignalInput } from '../../mobius/domain/types.js';
 import type {
   LearningCycleEvent,
   LearningEvidenceEvent,
@@ -153,6 +153,58 @@ const summarizeEvidence = (evidence: LearningEvidenceEvent) => ({
   payload: evidence.payload,
 });
 
+type NormalizedBehaviorSignal = {
+  key: string;
+  label: string;
+  value: number;
+  unit: 'ms' | 'count' | 'ratio' | 'minutes' | 'bytes' | 'pixels';
+  direction: 'higher-is-risk' | 'lower-is-risk' | 'contextual';
+  severity: 'info' | 'watch' | 'risk';
+};
+
+const finiteNumber = (value: unknown): number | null => (
+  typeof value === 'number' && Number.isFinite(value) ? value : null
+);
+
+const severityFor = (value: number, watchAt: number, riskAt: number): NormalizedBehaviorSignal['severity'] => {
+  if (value >= riskAt) return 'risk';
+  if (value >= watchAt) return 'watch';
+  return 'info';
+};
+
+const buildNormalizedBehaviorSignals = (input: LearningSignalInput | undefined): NormalizedBehaviorSignal[] => {
+  if (!input) return [];
+
+  const signals: NormalizedBehaviorSignal[] = [];
+  const add = (
+    key: string,
+    label: string,
+    value: number | null,
+    unit: NormalizedBehaviorSignal['unit'],
+    direction: NormalizedBehaviorSignal['direction'],
+    severity: NormalizedBehaviorSignal['severity'],
+  ) => {
+    if (value === null) return;
+    signals.push({ key, label, value, unit, direction, severity });
+  };
+
+  add('response-time', '作答耗时', finiteNumber(input.responseTimeMs), 'ms', 'higher-is-risk', severityFor(input.responseTimeMs ?? 0, 45_000, 90_000));
+  add('pause-duration', '停顿时长', finiteNumber(input.pauseDurationMs), 'ms', 'higher-is-risk', severityFor(input.pauseDurationMs ?? 0, 20_000, 45_000));
+  add('input-rhythm', '输入节奏', finiteNumber(input.inputRhythmMs), 'ms', 'contextual', severityFor(input.inputRhythmMs ?? 0, 8_000, 18_000));
+  add('attempts', '尝试次数', finiteNumber(input.attempts), 'count', 'higher-is-risk', severityFor(input.attempts ?? 0, 2, 4));
+  add('retry-frequency', '重试频率', finiteNumber(input.retryFrequency), 'ratio', 'higher-is-risk', severityFor(input.retryFrequency ?? 0, 0.35, 0.65));
+  add('scroll-burst', '滚动突增', finiteNumber(input.scrollBurstCount), 'count', 'higher-is-risk', severityFor(input.scrollBurstCount ?? 0, 3, 6));
+  add('draft-upload', '草稿上传', finiteNumber(input.draftUploadCount), 'count', 'contextual', severityFor(input.draftUploadCount ?? 0, 1, 3));
+  add('wrong-streak', '连续错误', finiteNumber(input.wrongStreak), 'count', 'higher-is-risk', severityFor(input.wrongStreak ?? 0, 1, 3));
+  add('correct-streak', '连续正确', finiteNumber(input.correctStreak), 'count', 'lower-is-risk', 'info');
+  add('time-saved', '节省时间', finiteNumber(input.timeSavedMinutes), 'minutes', 'lower-is-risk', 'info');
+  add('image-width', '题图宽度', finiteNumber(input.imageMetadata?.width), 'pixels', 'contextual', 'info');
+  add('image-height', '题图高度', finiteNumber(input.imageMetadata?.height), 'pixels', 'contextual', 'info');
+  add('image-bytes', '题图大小', finiteNumber(input.imageMetadata?.byteSize), 'bytes', 'contextual', severityFor(input.imageMetadata?.byteSize ?? 0, 3_000_000, 7_000_000));
+
+  return signals;
+};
+
 const buildFlow = (
   cycle: LearningCycleRecord,
   events: LearningCycleEvent[],
@@ -240,6 +292,25 @@ export class LearningCycleService {
         stateVector: input.stateVectorBefore ? toJsonObject(input.stateVectorBefore) : undefined,
       },
     });
+    const behaviorSignals = buildNormalizedBehaviorSignals(input.learningSignals);
+    if (behaviorSignals.length) {
+      await this.repository.appendEvidence({
+        studentId: cycle.studentId,
+        cycleId: cycle.id,
+        modality: 'interaction',
+        source: 'behavior.signals.normalized',
+        painPoint: cycle.painPoint,
+        rule: cycle.rule,
+        confidence: 0.65,
+        observedAt: cycle.createdAt,
+        modelVersion: 'behavior-signals-v1',
+        privacyLevel: 'server',
+        payload: {
+          signals: behaviorSignals,
+          raw: input.learningSignals,
+        },
+      });
+    }
     if (cycle.selectedAction) {
       await this.repository.appendEvidence({
         studentId: cycle.studentId,

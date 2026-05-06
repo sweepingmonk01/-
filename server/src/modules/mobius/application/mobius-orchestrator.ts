@@ -94,6 +94,7 @@ export class MobiusOrchestrator {
       knowledgeActionId: context.knowledgeAction?.id,
       stateBefore: cognitiveState,
       stateVectorBefore: stateVector ?? undefined,
+      learningSignals: context.learningSignals,
       selectedAction: {
         knowledgeAction: context.knowledgeAction,
         interactionPrompt: story.interactionPrompt,

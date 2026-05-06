@@ -136,6 +136,10 @@ test('MobiusOrchestrator builds a session with structured error profile', async 
     && item.source === 'graph.prior.applied'
     && item.targetNodeKey === 'geom-midpoint',
   ));
+  const behaviorEvidence = report?.flow.evidence.find((item) => item.source === 'behavior.signals.normalized');
+  assert.ok(behaviorEvidence);
+  assert.ok(Array.isArray(behaviorEvidence.payload.signals));
+  assert.ok((behaviorEvidence.payload.signals as Array<{ key: string }>).some((item) => item.key === 'attempts'));
 });
 
 test('MobiusOrchestrator adjudicates structured interaction submissions', async () => {

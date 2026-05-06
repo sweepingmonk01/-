@@ -11,8 +11,18 @@ export type { CognitiveState, CompatibleCognitiveState, LegacyCognitiveState } f
 
 export interface LearningSignalInput {
   responseTimeMs?: number;
+  pauseDurationMs?: number;
+  inputRhythmMs?: number;
   attempts?: number;
+  retryFrequency?: number;
   scrollBurstCount?: number;
+  draftUploadCount?: number;
+  imageMetadata?: {
+    width?: number;
+    height?: number;
+    mimeType?: string;
+    byteSize?: number;
+  };
   correctStreak?: number;
   wrongStreak?: number;
   timeSavedMinutes?: number;
