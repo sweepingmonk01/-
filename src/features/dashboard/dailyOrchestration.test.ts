@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { buildTodayPlan, sortTodayPlan } from './App.js';
+import { buildSortedTodayPlan, buildTodayPlan, sortTodayPlan } from './dailyOrchestration.js';
 
 const baseInput = {
   targetScore: 105,
@@ -63,4 +63,17 @@ test('sortTodayPlan groups urgent before todo before done', () => {
   ];
   const sorted = sortTodayPlan(plan);
   assert.deepEqual(sorted.map((task) => task.status), ['urgent', 'todo', 'done']);
+});
+
+test('buildSortedTodayPlan composes build + sort and is referentially stable', () => {
+  const sortedA = buildSortedTodayPlan({ ...baseInput, topSignal: '函数图像' });
+  const sortedB = buildSortedTodayPlan({ ...baseInput, topSignal: '函数图像' });
+  assert.deepEqual(
+    sortedA.map((task) => task.id),
+    sortedB.map((task) => task.id),
+    '相同 input 必须产生相同排序输出',
+  );
+  // 第一项要么是 urgent error-revive，要么没 error 时是其他 urgent
+  assert.ok(sortedA.length >= 3);
+  assert.ok(['urgent', 'todo'].includes(sortedA[0]?.status ?? 'done'));
 });

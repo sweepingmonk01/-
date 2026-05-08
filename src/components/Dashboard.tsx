@@ -268,7 +268,7 @@ export default function Dashboard({
               className="cloud-glass vl-surface relative rounded-[20px] px-3 py-2"
             >
               <div className="flex items-center justify-between gap-2">
-                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-400">上次干预后</p>
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-400">上次干预 · 状态变化</p>
                 <div
                   className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
                     data.lastInteractionDiff.outcome === 'success'
