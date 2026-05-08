@@ -340,7 +340,10 @@ export default function Dashboard({
             </motion.section>
           ) : null}
 
-          <GrowthLayerPanel nodes={data.topMasteryNodes} />
+          <GrowthLayerPanel
+            nodes={data.topMasteryNodes}
+            graphSnapshot={knowledgeGraphSnapshot ?? undefined}
+          />
 
           <KnowledgeGraphHotspotsPanel snapshot={knowledgeGraphSnapshot ?? undefined} />
 
