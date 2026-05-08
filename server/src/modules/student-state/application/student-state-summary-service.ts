@@ -1,5 +1,6 @@
 import type { MistakeCategory } from '../../learning/domain/protocol.js';
 import { normalizeCognitiveState } from '../../../../../shared/cognitive-state.js';
+import { buildWeeklyRhythm } from '../../../../../shared/weekly-rhythm.js';
 import type { StudentStateRepository } from '../domain/ports.js';
 import type {
   InteractionKernelDiff,
@@ -96,11 +97,18 @@ export class StudentStateSummaryService {
     const [vector, latest, recentSnapshots] = await Promise.all([
       this.deps.stateVectors.getCurrentVector(studentId),
       this.deps.repository.getLatestByStudent(studentId),
-      this.deps.repository.listByStudent(studentId, 12, 0),
+      // 拉取 60 条覆盖最近 ~1 周的高强度使用，用于 lastInteractionDiff /
+      // topMasteryNodes label / weeklyRhythm 三个 ops 派生。
+      this.deps.repository.listByStudent(studentId, 60, 0),
     ]);
     if (!vector || !latest) return null;
     const lastInteractionDiff = computeLastInteractionDiff(recentSnapshots);
     const topMasteryNodes = computeTopMasteryNodes(vector, recentSnapshots);
+    const weeklyRhythm = buildWeeklyRhythm({
+      resolvedAtIsoList: recentSnapshots
+        .filter((snapshot) => snapshot.source === 'interaction-resolved')
+        .map((snapshot) => snapshot.createdAt),
+    });
 
     let stats = {
       totalSnapshots: vector.snapshotCount,
@@ -127,6 +135,7 @@ export class StudentStateSummaryService {
       currentCognitiveState: vector.cognitive,
       lastInteractionDiff,
       topMasteryNodes: topMasteryNodes.length > 0 ? topMasteryNodes : undefined,
+      weeklyRhythm,
       recentPainPoints: vector.recentPainPoints,
       activeRules: vector.activeRules,
       mistakeCategoryCounts: vector.mistakeCategoryCounts as Partial<Record<MistakeCategory, number>>,

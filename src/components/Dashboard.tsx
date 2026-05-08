@@ -28,6 +28,7 @@ import MissionBadge from './ui/MissionBadge';
 import MechanismLayerBadge from '../features/dashboard/MechanismLayerBadge';
 import KernelDeltaToast from '../features/dashboard/KernelDeltaToast';
 import GrowthLayerPanel from '../features/dashboard/GrowthLayerPanel';
+import OpsLayerCalendar from '../features/dashboard/OpsLayerCalendar';
 
 interface DashboardProps {
   data: DashboardViewState;
@@ -335,6 +336,8 @@ export default function Dashboard({
 
           <GrowthLayerPanel nodes={data.topMasteryNodes} />
 
+          <OpsLayerCalendar rhythm={data.weeklyRhythm} />
+
           <div className="grid grid-cols-2 gap-2">
             <motion.button
               initial={{ opacity: 0, x: -14, rotate: -2 }}
@@ -374,10 +377,7 @@ export default function Dashboard({
             className="cloud-glass vl-surface relative rounded-[22px] px-2.5 py-2"
           >
             <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5">
-                <p className="text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">航线补给</p>
-                <MechanismLayerBadge layer="ops" />
-              </div>
+              <p className="text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">航线补给 · 快捷入口</p>
               <div className="rounded-full bg-[linear-gradient(90deg,#edf4ff_0%,#fff2f7_100%)] px-2.5 py-0.5 text-[9px] font-black text-[var(--color-primary)]">
                 {coreModuleTag}
               </div>

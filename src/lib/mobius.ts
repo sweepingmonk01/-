@@ -483,6 +483,19 @@ export interface MobiusStudentStateSummaryResponse {
     confidence: number;
     lastEvidenceAt?: string;
   }>;
+  weeklyRhythm?: {
+    days: Array<{
+      dateISO: string;
+      dayKey: 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+      dayLabel: string;
+      completedCycles: number;
+      isToday: boolean;
+      isFuture: boolean;
+    }>;
+    weekTotal: number;
+    weekTarget: number;
+    streakDays: number;
+  };
   recentPainPoints: string[];
   activeRules: string[];
   mistakeCategoryCounts: Partial<Record<MistakeCategory, number>>;

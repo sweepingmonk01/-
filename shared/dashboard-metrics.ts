@@ -3,6 +3,7 @@ import {
   type CompatibleCognitiveState,
   type DashboardCognitiveProjection,
 } from './cognitive-state.js';
+import type { WeeklyRhythm } from './weekly-rhythm.js';
 
 export interface DashboardKernelDiff {
   occurredAt: string;
@@ -30,6 +31,7 @@ export interface DashboardMetricInputs {
   cognitiveState?: CompatibleCognitiveState;
   lastInteractionDiff?: DashboardKernelDiff;
   topMasteryNodes?: DashboardMasteryNode[];
+  weeklyRhythm?: WeeklyRhythm;
 }
 
 export interface DashboardViewState {
@@ -41,6 +43,7 @@ export interface DashboardViewState {
   cognitiveProjection: DashboardCognitiveProjection;
   lastInteractionDiff?: DashboardKernelDiff;
   topMasteryNodes?: DashboardMasteryNode[];
+  weeklyRhythm?: WeeklyRhythm;
 }
 
 export const buildDashboardViewState = ({
@@ -53,6 +56,7 @@ export const buildDashboardViewState = ({
   cognitiveState,
   lastInteractionDiff,
   topMasteryNodes,
+  weeklyRhythm,
 }: DashboardMetricInputs): DashboardViewState => {
   const cognitiveProjection = projectDashboardRadarState(cognitiveState);
   const attempts = successCount + failureCount;
@@ -96,5 +100,6 @@ export const buildDashboardViewState = ({
     cognitiveProjection,
     lastInteractionDiff,
     topMasteryNodes,
+    weeklyRhythm,
   };
 };

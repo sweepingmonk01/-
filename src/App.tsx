@@ -1216,6 +1216,7 @@ export default function App() {
       cognitiveState: currentCognitiveState,
       lastInteractionDiff: studentStateSummary?.lastInteractionDiff,
       topMasteryNodes: studentStateSummary?.topMasteryNodes,
+      weeklyRhythm: studentStateSummary?.weeklyRhythm,
     });
   })();
 

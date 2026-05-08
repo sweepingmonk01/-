@@ -49,6 +49,11 @@ export interface TopMasteryNode {
   lastEvidenceAt?: string;
 }
 
+// 运营层（game-topology 第 4 节最后一层）的可见快照。
+// 由 shared/weekly-rhythm.ts 计算后直接序列化输出，不在这里重复定义结构。
+import type { WeeklyRhythm } from '../../../../../shared/weekly-rhythm.js';
+export type { WeeklyRhythm } from '../../../../../shared/weekly-rhythm.js';
+
 export interface StudentStateSummary {
   studentId: string;
   stateVectorVersion?: string;
@@ -66,6 +71,8 @@ export interface StudentStateSummary {
   lastInteractionDiff?: InteractionKernelDiff;
   // 成长层可见快照：按证据强度排序后的 top N 节点。
   topMasteryNodes?: TopMasteryNode[];
+  // 运营层可见快照：本周 7 天节奏。
+  weeklyRhythm?: WeeklyRhythm;
   recentPainPoints: string[];
   activeRules: string[];
   mistakeCategoryCounts: Partial<Record<MistakeCategory, number>>;
