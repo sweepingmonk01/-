@@ -22,7 +22,12 @@ import { createMobiusAuthMiddleware } from './modules/auth/presentation/mobius-a
 import { MobiusOrchestrator } from './modules/mobius/application/mobius-orchestrator.js';
 import { HeuristicCognitiveEngine } from './modules/mobius/infrastructure/heuristic-cognitive-engine.js';
 import { HeuristicStoryPlanner } from './modules/mobius/infrastructure/heuristic-story-planner.js';
-import { ScoredStrategyScheduler } from './modules/mobius/infrastructure/scored-strategy-scheduler.js';
+import {
+  BALANCED_SCORED_SCHEDULER_CONFIG,
+  DEFAULT_SCORED_SCHEDULER_CONFIG,
+  ScoredStrategyScheduler,
+} from './modules/mobius/infrastructure/scored-strategy-scheduler.js';
+import { ShadowStrategyScheduler } from './modules/mobius/infrastructure/shadow-strategy-scheduler.js';
 import { FileMediaJobRepository } from './modules/mobius/infrastructure/file-media-job-repository.js';
 import { SQLiteMediaJobRepository } from './modules/mobius/infrastructure/sqlite-media-job-repository.js';
 import { SeedanceHttpClient } from './modules/mobius/infrastructure/seedance-http-client.js';
@@ -118,7 +123,18 @@ export const createMobiusApp = () => {
     studentStates,
     stateVectors: stateVectorService,
     updateEngine: stateUpdateEngine,
-    strategyScheduler: new ScoredStrategyScheduler(),
+    strategyScheduler: new ShadowStrategyScheduler(
+      {
+        policyId: DEFAULT_SCORED_SCHEDULER_CONFIG.policyId,
+        scheduler: new ScoredStrategyScheduler(DEFAULT_SCORED_SCHEDULER_CONFIG),
+      },
+      [
+        {
+          policyId: BALANCED_SCORED_SCHEDULER_CONFIG.policyId,
+          scheduler: new ScoredStrategyScheduler(BALANCED_SCORED_SCHEDULER_CONFIG),
+        },
+      ],
+    ),
     learningCycles,
   });
 

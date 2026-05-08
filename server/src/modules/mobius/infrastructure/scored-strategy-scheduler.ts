@@ -1,13 +1,87 @@
 import type { StrategyScheduler } from '../domain/ports.js';
-import type { StrategyCandidate, StrategyKind, StrategySchedulerInput } from '../domain/types.js';
+import type {
+  StrategyCandidate,
+  StrategyDecision,
+  StrategyKind,
+  StrategySchedulerInput,
+} from '../domain/types.js';
 import {
   buildStrategyScoreBreakdown,
   STRATEGY_BASE_SCORES,
   summarizeStrategyBreakdown,
 } from './strategy-policy-features.js';
 
+// v0 工程估值。这些阈值是当前线上策略的不锁字段，A/B 影子策略通过覆盖
+// teachUnlock 阈值与 strategyBias 来产生与主策略不同的决策曲面。
+// 等到累计 N=200 cycles 之后，这套阈值会被基于 effectScore 的回归替换。
+export interface ScoredSchedulerConfig {
+  policyId: string;
+  teachUnlock: {
+    recentFailurePressure: number;
+    timePressureSolo: number;
+    emotionRiskSolo: number;
+    timePressureCombo: number;
+    noisePressureCombo: number;
+    emotionRiskCombo: number;
+  };
+  strategyBias: {
+    teachUnlocked: number;
+    teachLocked: number;
+    probeWhenNoisy: number;
+    probeNoiseThreshold: number;
+  };
+}
+
+export const DEFAULT_SCORED_SCHEDULER_CONFIG: ScoredSchedulerConfig = {
+  policyId: 'scored-default-v0',
+  teachUnlock: {
+    recentFailurePressure: 12,
+    timePressureSolo: 18,
+    emotionRiskSolo: 18,
+    timePressureCombo: 12,
+    noisePressureCombo: 16,
+    emotionRiskCombo: 14,
+  },
+  strategyBias: {
+    teachUnlocked: 6,
+    teachLocked: -28,
+    probeWhenNoisy: 6,
+    probeNoiseThreshold: 12,
+  },
+};
+
+// 影子策略：更早解锁 teach，对 probe 在低噪声下也给出鼓励，
+// 用于离线对比哪种策略带来更高的 effectScore。
+export const BALANCED_SCORED_SCHEDULER_CONFIG: ScoredSchedulerConfig = {
+  policyId: 'scored-balanced-v0',
+  teachUnlock: {
+    recentFailurePressure: 8,
+    timePressureSolo: 14,
+    emotionRiskSolo: 14,
+    timePressureCombo: 10,
+    noisePressureCombo: 12,
+    emotionRiskCombo: 10,
+  },
+  strategyBias: {
+    teachUnlocked: 4,
+    teachLocked: -20,
+    probeWhenNoisy: 8,
+    probeNoiseThreshold: 8,
+  },
+};
+
 export class ScoredStrategyScheduler implements StrategyScheduler {
-  decide(input: StrategySchedulerInput) {
+  private readonly config: ScoredSchedulerConfig;
+
+  constructor(config: ScoredSchedulerConfig = DEFAULT_SCORED_SCHEDULER_CONFIG) {
+    this.config = config;
+  }
+
+  get policyId(): string {
+    return this.config.policyId;
+  }
+
+  decide(input: StrategySchedulerInput): StrategyDecision {
     const candidates: StrategyCandidate[] = [
       this.buildCandidate('probe', input),
       this.buildCandidate('teach', input),
@@ -17,6 +91,7 @@ export class ScoredStrategyScheduler implements StrategyScheduler {
     return {
       candidates,
       selectedStrategy: candidates[0]?.strategy ?? 'probe',
+      policyId: this.config.policyId,
     };
   }
 
@@ -50,19 +125,26 @@ export class ScoredStrategyScheduler implements StrategyScheduler {
     const noisePressure = breakdown.noisePressure.value;
     const emotionRisk = breakdown.emotionRisk.value;
     const recentFailurePressure = breakdown.recentFailurePressure.value;
+    const { teachUnlock, strategyBias } = this.config;
 
     const teachUnlocked =
-      recentFailurePressure >= 12
-      || timePressure >= 18
-      || emotionRisk >= 18
-      || (timePressure >= 12 && noisePressure >= 16 && emotionRisk >= 14);
+      recentFailurePressure >= teachUnlock.recentFailurePressure
+      || timePressure >= teachUnlock.timePressureSolo
+      || emotionRisk >= teachUnlock.emotionRiskSolo
+      || (
+        timePressure >= teachUnlock.timePressureCombo
+        && noisePressure >= teachUnlock.noisePressureCombo
+        && emotionRisk >= teachUnlock.emotionRiskCombo
+      );
 
     if (strategy === 'teach') {
-      return teachUnlocked ? 6 : -28;
+      return teachUnlocked ? strategyBias.teachUnlocked : strategyBias.teachLocked;
     }
 
     if (strategy === 'probe') {
-      return noisePressure >= 12 && !teachUnlocked ? 6 : 0;
+      return noisePressure >= strategyBias.probeNoiseThreshold && !teachUnlocked
+        ? strategyBias.probeWhenNoisy
+        : 0;
     }
 
     return 0;

@@ -89,6 +89,8 @@ export class MobiusOrchestrator {
         emotion: story.emotion,
         selectedStrategy: story.strategyDecision.selectedStrategy,
         strategyCandidates: story.strategyDecision.candidates,
+        strategyPolicyId: story.strategyDecision.policyId,
+        strategyAlternatives: story.strategyDecision.alternatives,
       },
     });
 
