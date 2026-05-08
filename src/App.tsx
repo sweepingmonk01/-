@@ -929,6 +929,16 @@ export default function App() {
     void refreshKnowledgeGraph('demo-student');
   };
 
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (authChecking) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('demo') === '1' && !demoMode && !user) {
+      enterDemoMode();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authChecking]);
+
   const handleEnterCamp = async () => {
     if (authChecking) return;
 
@@ -1378,6 +1388,7 @@ export default function App() {
       activeIssuesCount: errorStats.total,
       painPoints: uniquePainPoints,
       cognitiveState: currentCognitiveState,
+      lastInteractionDiff: studentStateSummary?.lastInteractionDiff,
     });
   })();
 

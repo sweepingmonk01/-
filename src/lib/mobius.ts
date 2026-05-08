@@ -469,6 +469,13 @@ export interface MobiusStudentStateSummaryResponse {
     lastOutcome?: 'success' | 'failure';
   };
   currentCognitiveState?: CognitiveState;
+  lastInteractionDiff?: {
+    occurredAt: string;
+    outcome: 'success' | 'failure';
+    before: { time: number; signalNoiseRatio: number; emotion: number };
+    after: { time: number; signalNoiseRatio: number; emotion: number };
+    delta: { time: number; signalNoiseRatio: number; emotion: number };
+  };
   recentPainPoints: string[];
   activeRules: string[];
   mistakeCategoryCounts: Partial<Record<MistakeCategory, number>>;

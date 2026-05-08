@@ -260,6 +260,62 @@ export default function Dashboard({
             </motion.section>
           </div>
 
+          {data.lastInteractionDiff ? (
+            <motion.section
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.32, delay: 0.04 }}
+              className="cloud-glass vl-surface relative rounded-[20px] px-3 py-2"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <p className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-400">上次干预后</p>
+                <div
+                  className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
+                    data.lastInteractionDiff.outcome === 'success'
+                      ? 'bg-emerald-50 text-emerald-600'
+                      : 'bg-rose-50 text-rose-600'
+                  }`}
+                >
+                  {data.lastInteractionDiff.outcome === 'success' ? '成功' : '失败'}
+                </div>
+              </div>
+              <div className="mt-1.5 grid grid-cols-3 gap-2">
+                {(
+                  [
+                    { key: 'time', label: '时间' },
+                    { key: 'signalNoiseRatio', label: '信噪比' },
+                    { key: 'emotion', label: '情绪' },
+                  ] as const
+                ).map(({ key, label }) => {
+                  const before = data.lastInteractionDiff!.before[key];
+                  const after = data.lastInteractionDiff!.after[key];
+                  const delta = data.lastInteractionDiff!.delta[key];
+                  const tone =
+                    delta > 0
+                      ? 'text-emerald-600'
+                      : delta < 0
+                      ? 'text-rose-600'
+                      : 'text-gray-500';
+                  const sign = delta > 0 ? '+' : '';
+                  return (
+                    <div key={key} className="rounded-xl border border-[#7aa7ff]/14 bg-white/85 px-2 py-1.5 text-center">
+                      <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-gray-400">{label}</p>
+                      <p className="mt-0.5 text-[12px] font-black leading-tight text-[#1a1a2e]">
+                        {before}
+                        <span className="mx-0.5 text-gray-300">→</span>
+                        {after}
+                      </p>
+                      <p className={`text-[11px] font-black leading-tight ${tone}`}>
+                        {sign}
+                        {delta}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.section>
+          ) : null}
+
           <div className="grid grid-cols-2 gap-2">
             <motion.button
               initial={{ opacity: 0, x: -14, rotate: -2 }}

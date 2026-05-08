@@ -31,6 +31,14 @@ export interface StudentStateSnapshotInput extends Omit<StudentStateSnapshot, 'i
   cognitiveState: CompatibleCognitiveState;
 }
 
+export interface InteractionKernelDiff {
+  occurredAt: string;
+  outcome: InteractionOutcome;
+  before: { time: number; signalNoiseRatio: number; emotion: number };
+  after: { time: number; signalNoiseRatio: number; emotion: number };
+  delta: { time: number; signalNoiseRatio: number; emotion: number };
+}
+
 export interface StudentStateSummary {
   studentId: string;
   stateVectorVersion?: string;
@@ -43,6 +51,9 @@ export interface StudentStateSummary {
     lastOutcome?: InteractionOutcome;
   };
   currentCognitiveState?: CognitiveState;
+  // 最近一次 interaction-resolved 的 kernel 三轴前后对比。用于把
+  // "状态驱动学习"从抽象概念落到学生能直接看到的可视化反馈。
+  lastInteractionDiff?: InteractionKernelDiff;
   recentPainPoints: string[];
   activeRules: string[];
   mistakeCategoryCounts: Partial<Record<MistakeCategory, number>>;

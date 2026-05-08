@@ -4,6 +4,14 @@ import {
   type DashboardCognitiveProjection,
 } from './cognitive-state.js';
 
+export interface DashboardKernelDiff {
+  occurredAt: string;
+  outcome: 'success' | 'failure';
+  before: { time: number; signalNoiseRatio: number; emotion: number };
+  after: { time: number; signalNoiseRatio: number; emotion: number };
+  delta: { time: number; signalNoiseRatio: number; emotion: number };
+}
+
 export interface DashboardMetricInputs {
   targetScore?: number;
   timeSavedMinutes?: number;
@@ -12,6 +20,7 @@ export interface DashboardMetricInputs {
   activeIssuesCount?: number;
   painPoints?: Array<string | null | undefined>;
   cognitiveState?: CompatibleCognitiveState;
+  lastInteractionDiff?: DashboardKernelDiff;
 }
 
 export interface DashboardViewState {
@@ -21,6 +30,7 @@ export interface DashboardViewState {
   activeIssuesCount: number;
   topPainPoints: string[];
   cognitiveProjection: DashboardCognitiveProjection;
+  lastInteractionDiff?: DashboardKernelDiff;
 }
 
 export const buildDashboardViewState = ({
@@ -31,6 +41,7 @@ export const buildDashboardViewState = ({
   activeIssuesCount = 0,
   painPoints = [],
   cognitiveState,
+  lastInteractionDiff,
 }: DashboardMetricInputs): DashboardViewState => {
   const cognitiveProjection = projectDashboardRadarState(cognitiveState);
   const attempts = successCount + failureCount;
@@ -72,5 +83,6 @@ export const buildDashboardViewState = ({
     activeIssuesCount,
     topPainPoints,
     cognitiveProjection,
+    lastInteractionDiff,
   };
 };
