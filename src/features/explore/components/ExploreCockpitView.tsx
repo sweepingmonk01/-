@@ -16,6 +16,21 @@ import type {
   ExploreProfileHistoryItem,
 } from '../repository/exploreProfileApiTypes';
 
+const flightIslandAssets = [
+  {
+    key: 'zh',
+    src: new URL('../../../../app/assets/generated/subject-islands/zh-island-reference.png', import.meta.url).href,
+  },
+  {
+    key: 'ma',
+    src: new URL('../../../../app/assets/generated/subject-islands/ma-island-reference.png', import.meta.url).href,
+  },
+  {
+    key: 'en',
+    src: new URL('../../../../app/assets/generated/subject-islands/en-island-reference.png', import.meta.url).href,
+  },
+];
+
 const defaultScope = {
   userId: 'local-user',
   studentId: 'local-student',
@@ -275,9 +290,20 @@ export default function ExploreCockpitView({
   })();
 
   return (
-    <div className="absolute inset-0 flex h-full w-full flex-col overflow-hidden bg-[#06111f] pb-24 text-white">
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_16%_10%,rgba(56,189,248,0.22),transparent_32%),radial-gradient(circle_at_84%_18%,rgba(16,185,129,0.14),transparent_28%),radial-gradient(circle_at_50%_94%,rgba(244,114,182,0.14),transparent_30%)]" />
-      <div className="pointer-events-none absolute inset-0 opacity-35 [background-image:linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:28px_28px]" />
+    <div className="vl-page yufeng-visual-unified yufeng-flight-shell absolute inset-0 flex h-full w-full flex-col overflow-hidden pb-24 text-[var(--vl-ink)]">
+      <div className="yufeng-flight-field" />
+      <div className="yufeng-flight-grid" />
+      <div className="yufeng-route-ribbon" />
+      {flightIslandAssets.map((asset) => (
+        <img
+          key={asset.key}
+          className={`yufeng-flight-island yufeng-flight-island-${asset.key}`}
+          src={asset.src}
+          alt=""
+          aria-hidden="true"
+        />
+      ))}
+      <div className="yufeng-compass-mark" />
 
       <div className="relative z-10 flex min-h-0 flex-1 flex-col px-3 pt-3">
         <header className="mb-3 flex items-center justify-between gap-3">
@@ -298,7 +324,7 @@ export default function ExploreCockpitView({
           </div>
         </header>
 
-        <main className="min-h-0 flex-1 overflow-y-auto rounded-[26px] border border-white/10 bg-white/[0.06] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+        <main className="cloud-glass vl-surface yufeng-scroll-pane min-h-0 flex-1 rounded-[26px] p-2">
           <div className="space-y-3">
             <section className="relative overflow-hidden rounded-[24px] border border-white/12 bg-[#020817] px-4 py-5 shadow-[0_18px_40px_rgba(0,0,0,0.24)]">
               <div className="absolute inset-0 bg-[radial-gradient(circle_at_14%_16%,rgba(56,189,248,0.20),transparent_34%),radial-gradient(circle_at_86%_14%,rgba(16,185,129,0.16),transparent_30%),linear-gradient(135deg,rgba(255,255,255,0.06),transparent_45%)]" />

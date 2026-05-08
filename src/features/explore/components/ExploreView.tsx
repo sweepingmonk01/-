@@ -38,6 +38,21 @@ import { ExploreActiveRadar } from './ExploreActiveRadar';
 import { ExploreMediaWorkbench } from './ExploreMediaWorkbench';
 import { ExploreTaskCompletionPanel } from './ExploreTaskCompletionPanel';
 
+const flightIslandAssets = [
+  {
+    key: 'zh',
+    src: new URL('../../../../app/assets/generated/subject-islands/zh-island-reference.png', import.meta.url).href,
+  },
+  {
+    key: 'ma',
+    src: new URL('../../../../app/assets/generated/subject-islands/ma-island-reference.png', import.meta.url).href,
+  },
+  {
+    key: 'en',
+    src: new URL('../../../../app/assets/generated/subject-islands/en-island-reference.png', import.meta.url).href,
+  },
+];
+
 const AIDiagnosisDebugWorkbench = lazy(() =>
   import('../../errors/diagnosis/AIDiagnosisDebugWorkbench').then((module) => ({
     default: module.AIDiagnosisDebugWorkbench,
@@ -226,10 +241,21 @@ export default function ExploreView({
       initial={{ opacity: 0, x: 24 }}
       animate={{ opacity: 1, x: 0 }}
       exit={{ opacity: 0, x: -24 }}
-      className="absolute inset-0 flex h-full w-full flex-col overflow-hidden bg-[#07111f] pb-24 text-white"
+      className="vl-page yufeng-visual-unified yufeng-flight-shell absolute inset-0 flex h-full w-full flex-col overflow-hidden pb-24 text-[var(--vl-ink)]"
     >
-      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_14%_12%,rgba(56,189,248,0.22),transparent_30%),radial-gradient(circle_at_84%_18%,rgba(244,114,182,0.16),transparent_26%),radial-gradient(circle_at_48%_92%,rgba(245,158,11,0.16),transparent_30%)]" />
-      <div className="pointer-events-none absolute inset-0 opacity-40 [background-image:linear-gradient(rgba(255,255,255,0.05)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,0.05)_1px,transparent_1px)] [background-size:28px_28px]" />
+      <div className="yufeng-flight-field" />
+      <div className="yufeng-flight-grid" />
+      <div className="yufeng-route-ribbon" />
+      {flightIslandAssets.map((asset) => (
+        <img
+          key={asset.key}
+          className={`yufeng-flight-island yufeng-flight-island-${asset.key}`}
+          src={asset.src}
+          alt=""
+          aria-hidden="true"
+        />
+      ))}
+      <div className="yufeng-compass-mark" />
       <div className="relative z-10 flex min-h-0 flex-1 flex-col px-3 pt-3">
         <header className="mb-3 flex items-center justify-between gap-3">
           <button
@@ -250,7 +276,7 @@ export default function ExploreView({
           </div>
         </header>
 
-        <div className="min-h-0 flex-1 overflow-y-auto rounded-[26px] border border-white/10 bg-white/[0.06] p-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)]">
+        <div className="cloud-glass vl-surface yufeng-scroll-pane min-h-0 flex-1 rounded-[26px] p-2">
           {content}
         </div>
       </div>
