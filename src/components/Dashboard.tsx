@@ -27,6 +27,7 @@ import GameButton from './ui/GameButton';
 import MissionBadge from './ui/MissionBadge';
 import MechanismLayerBadge from '../features/dashboard/MechanismLayerBadge';
 import KernelDeltaToast from '../features/dashboard/KernelDeltaToast';
+import GrowthLayerPanel from '../features/dashboard/GrowthLayerPanel';
 
 interface DashboardProps {
   data: DashboardViewState;
@@ -331,6 +332,8 @@ export default function Dashboard({
               </div>
             </motion.section>
           ) : null}
+
+          <GrowthLayerPanel nodes={data.topMasteryNodes} />
 
           <div className="grid grid-cols-2 gap-2">
             <motion.button

@@ -39,6 +39,16 @@ export interface InteractionKernelDiff {
   delta: { time: number; signalNoiseRatio: number; emotion: number };
 }
 
+// 知识节点掌握度的可见快照，作为成长层（game-topology 第 4 节）反馈。
+// 服务端把 vector.mastery 中最值得展示的 N 个节点筛出来并附上人类可读 label。
+export interface TopMasteryNode {
+  key: string;
+  label: string;
+  score: number;
+  confidence: number;
+  lastEvidenceAt?: string;
+}
+
 export interface StudentStateSummary {
   studentId: string;
   stateVectorVersion?: string;
@@ -54,6 +64,8 @@ export interface StudentStateSummary {
   // 最近一次 interaction-resolved 的 kernel 三轴前后对比。用于把
   // "状态驱动学习"从抽象概念落到学生能直接看到的可视化反馈。
   lastInteractionDiff?: InteractionKernelDiff;
+  // 成长层可见快照：按证据强度排序后的 top N 节点。
+  topMasteryNodes?: TopMasteryNode[];
   recentPainPoints: string[];
   activeRules: string[];
   mistakeCategoryCounts: Partial<Record<MistakeCategory, number>>;

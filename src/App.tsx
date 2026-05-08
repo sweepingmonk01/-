@@ -1215,6 +1215,7 @@ export default function App() {
       painPoints: uniquePainPoints,
       cognitiveState: currentCognitiveState,
       lastInteractionDiff: studentStateSummary?.lastInteractionDiff,
+      topMasteryNodes: studentStateSummary?.topMasteryNodes,
     });
   })();
 

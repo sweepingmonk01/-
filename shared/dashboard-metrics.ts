@@ -12,6 +12,14 @@ export interface DashboardKernelDiff {
   delta: { time: number; signalNoiseRatio: number; emotion: number };
 }
 
+export interface DashboardMasteryNode {
+  key: string;
+  label: string;
+  score: number;
+  confidence: number;
+  lastEvidenceAt?: string;
+}
+
 export interface DashboardMetricInputs {
   targetScore?: number;
   timeSavedMinutes?: number;
@@ -21,6 +29,7 @@ export interface DashboardMetricInputs {
   painPoints?: Array<string | null | undefined>;
   cognitiveState?: CompatibleCognitiveState;
   lastInteractionDiff?: DashboardKernelDiff;
+  topMasteryNodes?: DashboardMasteryNode[];
 }
 
 export interface DashboardViewState {
@@ -31,6 +40,7 @@ export interface DashboardViewState {
   topPainPoints: string[];
   cognitiveProjection: DashboardCognitiveProjection;
   lastInteractionDiff?: DashboardKernelDiff;
+  topMasteryNodes?: DashboardMasteryNode[];
 }
 
 export const buildDashboardViewState = ({
@@ -42,6 +52,7 @@ export const buildDashboardViewState = ({
   painPoints = [],
   cognitiveState,
   lastInteractionDiff,
+  topMasteryNodes,
 }: DashboardMetricInputs): DashboardViewState => {
   const cognitiveProjection = projectDashboardRadarState(cognitiveState);
   const attempts = successCount + failureCount;
@@ -84,5 +95,6 @@ export const buildDashboardViewState = ({
     topPainPoints,
     cognitiveProjection,
     lastInteractionDiff,
+    topMasteryNodes,
   };
 };

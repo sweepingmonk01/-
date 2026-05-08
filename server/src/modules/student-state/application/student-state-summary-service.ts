@@ -1,8 +1,53 @@
 import type { MistakeCategory } from '../../learning/domain/protocol.js';
 import { normalizeCognitiveState } from '../../../../../shared/cognitive-state.js';
 import type { StudentStateRepository } from '../domain/ports.js';
-import type { InteractionKernelDiff, StudentStateSnapshot, StudentStateSummary } from '../domain/types.js';
+import type {
+  InteractionKernelDiff,
+  StudentStateSnapshot,
+  StudentStateSummary,
+  StudentStateVector,
+  TopMasteryNode,
+} from '../domain/types.js';
 import { StateVectorService } from './state-vector-service.js';
+
+const TOP_MASTERY_LIMIT = 5;
+
+const buildLabelLookup = (snapshots: StudentStateSnapshot[]): Map<string, string> => {
+  const lookup = new Map<string, string>();
+  // 倒序遍历：最近的 snapshot 决定 label，避免被旧的 painPoint 覆盖。
+  for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+    const snapshot = snapshots[index];
+    const knowledgeKey = snapshot.profile.knowledgeActionId ?? snapshot.profile.rule;
+    if (!knowledgeKey || lookup.has(knowledgeKey)) continue;
+    const label = snapshot.profile.painPoint?.trim() || snapshot.profile.rule || knowledgeKey;
+    lookup.set(knowledgeKey, label);
+  }
+  return lookup;
+};
+
+const computeTopMasteryNodes = (
+  vector: StudentStateVector,
+  snapshots: StudentStateSnapshot[],
+): TopMasteryNode[] => {
+  const labelLookup = buildLabelLookup(snapshots);
+  const entries = Object.entries(vector.mastery);
+  if (entries.length === 0) return [];
+  // 按"证据强度 = score × (0.5 + confidence/2)" 排序，让 confidence 起到权重作用。
+  return entries
+    .map(([key, mastery]) => ({
+      key,
+      label: labelLookup.get(key) ?? key,
+      score: mastery.score,
+      confidence: mastery.confidence,
+      lastEvidenceAt: mastery.lastEvidenceAt,
+    }))
+    .sort((left, right) => {
+      const leftWeight = left.score * (0.5 + left.confidence / 2);
+      const rightWeight = right.score * (0.5 + right.confidence / 2);
+      return rightWeight - leftWeight;
+    })
+    .slice(0, TOP_MASTERY_LIMIT);
+};
 
 interface StudentStateSummaryServiceDeps {
   repository: StudentStateRepository;
@@ -55,6 +100,7 @@ export class StudentStateSummaryService {
     ]);
     if (!vector || !latest) return null;
     const lastInteractionDiff = computeLastInteractionDiff(recentSnapshots);
+    const topMasteryNodes = computeTopMasteryNodes(vector, recentSnapshots);
 
     let stats = {
       totalSnapshots: vector.snapshotCount,
@@ -80,6 +126,7 @@ export class StudentStateSummaryService {
       },
       currentCognitiveState: vector.cognitive,
       lastInteractionDiff,
+      topMasteryNodes: topMasteryNodes.length > 0 ? topMasteryNodes : undefined,
       recentPainPoints: vector.recentPainPoints,
       activeRules: vector.activeRules,
       mistakeCategoryCounts: vector.mistakeCategoryCounts as Partial<Record<MistakeCategory, number>>,

@@ -476,6 +476,13 @@ export interface MobiusStudentStateSummaryResponse {
     after: { time: number; signalNoiseRatio: number; emotion: number };
     delta: { time: number; signalNoiseRatio: number; emotion: number };
   };
+  topMasteryNodes?: Array<{
+    key: string;
+    label: string;
+    score: number;
+    confidence: number;
+    lastEvidenceAt?: string;
+  }>;
   recentPainPoints: string[];
   activeRules: string[];
   mistakeCategoryCounts: Partial<Record<MistakeCategory, number>>;
