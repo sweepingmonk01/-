@@ -2539,6 +2539,7 @@ export default function App() {
                 onReturnHome={() => { setDemoMode(false); setCurrentScreen('welcome'); }}
                 onTriggerUpload={() => fileInputRef.current?.click()}
                 onTriggerDehydrate={() => dehydrateInputRef.current?.click()}
+                knowledgeGraphSnapshot={knowledgeGraph}
               />
             </Suspense>
           )}

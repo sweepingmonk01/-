@@ -29,6 +29,7 @@ import MechanismLayerBadge from '../features/dashboard/MechanismLayerBadge';
 import KernelDeltaToast from '../features/dashboard/KernelDeltaToast';
 import GrowthLayerPanel from '../features/dashboard/GrowthLayerPanel';
 import OpsLayerCalendar from '../features/dashboard/OpsLayerCalendar';
+import KnowledgeGraphHotspotsPanel from '../features/dashboard/KnowledgeGraphHotspotsPanel';
 
 interface DashboardProps {
   data: DashboardViewState;
@@ -37,6 +38,10 @@ interface DashboardProps {
   onReturnHome: () => void;
   onTriggerUpload: () => void;
   onTriggerDehydrate: () => void;
+  knowledgeGraphSnapshot?: {
+    nodes: Array<{ key: string; label: string; weight: number }>;
+    edges: Array<{ source: string; target: string; weight: number }>;
+  } | null;
 }
 
 const shellCard = 'rounded-[22px]';
@@ -48,6 +53,7 @@ export default function Dashboard({
   onReturnHome,
   onTriggerUpload,
   onTriggerDehydrate,
+  knowledgeGraphSnapshot,
 }: DashboardProps) {
   if (loading) {
     return (
@@ -335,6 +341,8 @@ export default function Dashboard({
           ) : null}
 
           <GrowthLayerPanel nodes={data.topMasteryNodes} />
+
+          <KnowledgeGraphHotspotsPanel snapshot={knowledgeGraphSnapshot ?? undefined} />
 
           <OpsLayerCalendar rhythm={data.weeklyRhythm} />
 
