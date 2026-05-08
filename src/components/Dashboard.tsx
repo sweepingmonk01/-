@@ -30,6 +30,7 @@ import KernelDeltaToast from '../features/dashboard/KernelDeltaToast';
 import GrowthLayerPanel from '../features/dashboard/GrowthLayerPanel';
 import OpsLayerCalendar from '../features/dashboard/OpsLayerCalendar';
 import KnowledgeGraphHotspotsPanel from '../features/dashboard/KnowledgeGraphHotspotsPanel';
+import JourneyMapPanel from '../features/dashboard/JourneyMapPanel';
 
 interface DashboardProps {
   data: DashboardViewState;
@@ -148,6 +149,11 @@ export default function Dashboard({
               </GameButton>
             </div>
           </CloudGlassPanel>
+
+          <JourneyMapPanel
+            estimatedScore={data.estimatedScore || 0}
+            targetScore={data.targetScore || 115}
+          />
 
           <div className="grid min-h-0 flex-1 grid-cols-6 grid-rows-2 gap-2">
             <motion.section
