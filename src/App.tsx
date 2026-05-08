@@ -247,6 +247,114 @@ const getErrorMeta = (errorItem: any) => {
   };
 };
 
+interface TodayPlanInput {
+  targetScore: number;
+  topError?: any;
+  topSignal: string;
+  preferredFocus: { subject: SubjectKey; node: string };
+  taskStatus: Record<string, TaskStatusRecord>;
+  errorListLength: number;
+  timeSaved: number;
+  lastOutcome?: 'success' | 'failure';
+}
+
+// 把首页"今日任务"编排从 App 组件中的闭包 IIFE 提为模块级纯函数。
+// 第一步只做位置上移，签名等价于原闭包，便于后续替换为 useDailyOrchestration hook。
+export const buildTodayPlan = (input: TodayPlanInput): TaskCardData[] => {
+  const { targetScore, topError, topSignal, preferredFocus, taskStatus, errorListLength, timeSaved, lastOutcome } = input;
+  const plan: TaskCardData[] = [];
+  const expectedMinutes = Math.max(15, Math.ceil((targetScore - 85) * 1.5));
+  const shouldProtect = lastOutcome === 'failure';
+
+  if (topError || topSignal || preferredFocus.node) {
+    const subject = topError ? getErrorMeta(topError).subject : preferredFocus.subject;
+    const node = topError ? getErrorMeta(topError).node : preferredFocus.node;
+    const focusLabel = node || topSignal || '当前主线';
+    plan.push({
+      id: 'error-revive',
+      subject,
+      title: shouldProtect ? `保护性重构：${focusLabel}` : `优先修复：${focusLabel}`,
+      detail: shouldProtect
+        ? `最近一次裁决还没命中规则，先围绕“${topSignal || '当前高频错点'}”收窄提示。`
+        : `先把“${topSignal || '高频错点'}”修掉，立刻减少重复失分。`,
+      mins: shouldProtect ? 10 : 8,
+      xp: shouldProtect ? 20 : 18,
+      status: taskStatus['error-revive']?.completed ? 'done' : 'urgent',
+      action: topError ? 'error' : 'map',
+      focusSubject: subject,
+      focusNode: node || undefined,
+    });
+  } else {
+    plan.push({
+      id: 'upload-question',
+      subject: 'ma',
+      title: '上传 1 道真实不会题',
+      detail: '把今天最卡的一题交给列子御风拆解，拿到一句话法则。',
+      mins: 6,
+      xp: 12,
+      status: taskStatus['upload-question']?.completed ? 'done' : 'todo',
+      action: 'upload',
+    });
+  }
+
+  plan.push({
+    id: 'knowledge-map',
+    subject: preferredFocus.subject,
+    title: shouldProtect ? '巡视保护性节点' : '巡视知识地图',
+    detail: preferredFocus.node
+      ? `直接聚焦 ${SUBJECT_META[preferredFocus.subject].short} 的“${preferredFocus.node}”，别再平均用力。`
+      : '只看正在失血的节点，决定今晚优先打哪一块。',
+    mins: 4,
+    xp: 8,
+    status: taskStatus['knowledge-map']?.completed ? 'done' : errorListLength > 2 ? 'urgent' : 'todo',
+    action: 'map',
+    focusSubject: preferredFocus.subject,
+    focusNode: preferredFocus.node || undefined,
+  });
+
+  plan.push({
+    id: 'dehydrate-homework',
+    subject: 'en',
+    title: '整页作业脱水',
+    detail: `以 ${targetScore} 分目标重排作业优先级，回收低效题海时间。`,
+    mins: 5,
+    xp: 16,
+    status: taskStatus['dehydrate-homework']?.completed || timeSaved > 0 ? 'done' : 'todo',
+    action: 'dehydrate',
+  });
+
+  if (expectedMinutes > 26) {
+    plan.push({
+      id: 'stability-round',
+      subject: preferredFocus.subject,
+      title: shouldProtect ? '补 1 轮规则复位' : '补 1 轮短时巩固',
+      detail: shouldProtect
+        ? '先把最近失手的规则重新走顺，再进入额外扩张。'
+        : '目标分拉得更高，今晚需要一轮额外的保分复现。',
+      mins: 6,
+      xp: 10,
+      status: taskStatus['stability-round']?.completed ? 'done' : 'todo',
+      action: 'error',
+      focusSubject: preferredFocus.subject,
+      focusNode: preferredFocus.node || undefined,
+    });
+  }
+
+  return plan;
+};
+
+export const sortTodayPlan = (plan: TaskCardData[]): TaskCardData[] => {
+  const priority = { urgent: 0, todo: 1, done: 2 } as const;
+  return [...plan].sort((left, right) => {
+    if (priority[left.status] !== priority[right.status]) {
+      return priority[left.status] - priority[right.status];
+    }
+    if (left.id === 'error-revive') return -1;
+    if (right.id === 'error-revive') return 1;
+    return 0;
+  });
+};
+
 const normalizeKnowledgeKey = (value?: string | null) => (
   (value ?? '')
     .trim()
@@ -1160,98 +1268,16 @@ export default function App() {
   };
   const recommendedErrorId = focusRecommendation.matchedError?.id;
 
-  const todayPlan: TaskCardData[] = (() => {
-    const plan: TaskCardData[] = [];
-    const expectedMinutes = Math.max(15, Math.ceil((targetScore - 85) * 1.5));
-    const topError = focusRecommendation.matchedError;
-    const topSignal = focusRecommendation.rule || focusRecommendation.painPoint;
-    const lastOutcome = studentStateSummary?.interactionStats.lastOutcome;
-    const shouldProtect = lastOutcome === 'failure';
-
-    if (topError || topSignal || preferredFocus.node) {
-      const subject = topError ? getErrorMeta(topError).subject : preferredFocus.subject;
-      const node = topError ? getErrorMeta(topError).node : preferredFocus.node;
-      const focusLabel = node || topSignal || '当前主线';
-      plan.push({
-        id: 'error-revive',
-        subject,
-        title: shouldProtect ? `保护性重构：${focusLabel}` : `优先修复：${focusLabel}`,
-        detail: shouldProtect
-          ? `最近一次裁决还没命中规则，先围绕“${topSignal || '当前高频错点'}”收窄提示。`
-          : `先把“${topSignal || '高频错点'}”修掉，立刻减少重复失分。`,
-        mins: shouldProtect ? 10 : 8,
-        xp: shouldProtect ? 20 : 18,
-        status: taskStatus['error-revive']?.completed ? 'done' : 'urgent',
-        action: topError ? 'error' : 'map',
-        focusSubject: subject,
-        focusNode: node || undefined,
-      });
-    } else {
-      plan.push({
-        id: 'upload-question',
-        subject: 'ma',
-        title: '上传 1 道真实不会题',
-        detail: '把今天最卡的一题交给列子御风拆解，拿到一句话法则。',
-        mins: 6,
-        xp: 12,
-        status: taskStatus['upload-question']?.completed ? 'done' : 'todo',
-        action: 'upload',
-      });
-    }
-
-    plan.push({
-      id: 'knowledge-map',
-      subject: preferredFocus.subject,
-      title: shouldProtect ? '巡视保护性节点' : '巡视知识地图',
-      detail: preferredFocus.node
-        ? `直接聚焦 ${SUBJECT_META[preferredFocus.subject].short} 的“${preferredFocus.node}”，别再平均用力。`
-        : '只看正在失血的节点，决定今晚优先打哪一块。',
-      mins: 4,
-      xp: 8,
-      status: taskStatus['knowledge-map']?.completed ? 'done' : errorList.length > 2 ? 'urgent' : 'todo',
-      action: 'map',
-      focusSubject: preferredFocus.subject,
-      focusNode: preferredFocus.node || undefined,
-    });
-
-    plan.push({
-      id: 'dehydrate-homework',
-      subject: 'en',
-      title: '整页作业脱水',
-      detail: `以 ${targetScore} 分目标重排作业优先级，回收低效题海时间。`,
-      mins: 5,
-      xp: 16,
-      status: taskStatus['dehydrate-homework']?.completed || timeSaved > 0 ? 'done' : 'todo',
-      action: 'dehydrate',
-    });
-
-    if (expectedMinutes > 26) {
-      plan.push({
-        id: 'stability-round',
-        subject: preferredFocus.subject,
-        title: shouldProtect ? '补 1 轮规则复位' : '补 1 轮短时巩固',
-        detail: shouldProtect
-          ? '先把最近失手的规则重新走顺，再进入额外扩张。'
-          : '目标分拉得更高，今晚需要一轮额外的保分复现。',
-        mins: 6,
-        xp: 10,
-        status: taskStatus['stability-round']?.completed ? 'done' : 'todo',
-        action: 'error',
-        focusSubject: preferredFocus.subject,
-        focusNode: preferredFocus.node || undefined,
-      });
-    }
-
-    return plan;
-  })().sort((left, right) => {
-    const priority = { urgent: 0, todo: 1, done: 2 };
-    if (priority[left.status] !== priority[right.status]) {
-      return priority[left.status] - priority[right.status];
-    }
-    if (left.id === 'error-revive') return -1;
-    if (right.id === 'error-revive') return 1;
-    return 0;
-  });
+  const todayPlan: TaskCardData[] = sortTodayPlan(buildTodayPlan({
+    targetScore,
+    topError: focusRecommendation.matchedError,
+    topSignal: focusRecommendation.rule || focusRecommendation.painPoint,
+    preferredFocus,
+    taskStatus,
+    errorListLength: errorList.length,
+    timeSaved,
+    lastOutcome: studentStateSummary?.interactionStats.lastOutcome,
+  }));
 
   const planTotals = todayPlan.reduce(
     (acc, item) => {
