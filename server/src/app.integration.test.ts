@@ -584,10 +584,20 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
         flow: {
           stateBefore?: unknown;
           hypothesis?: unknown;
-          selectedAction?: { selectedStrategy?: string };
+          selectedAction?: {
+            selectedStrategy?: string;
+            strategyPolicyId?: string;
+            strategyAlternatives?: Array<{
+              policyId: string;
+              selectedStrategy: string;
+            }>;
+          };
           result: { outcome?: string; effectScore?: number; status: string };
           stateAfter?: unknown;
-          events: Array<{ eventType: string }>;
+          events: Array<{
+            eventType: string;
+            eventPayload?: Record<string, unknown>;
+          }>;
         };
       };
       assert.equal(cycleReport.cycle.id, session.cycleId);
@@ -604,6 +614,29 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
         cycleReport.flow.events.map((event) => event.eventType),
         events.map((event) => event.eventType),
       );
+
+      // 锁定 #1 effectScore breakdown 契约：effect.evaluated 事件必须带 breakdown。
+      const effectEvent = cycleReport.flow.events.find((event) => event.eventType === 'effect.evaluated');
+      assert.ok(effectEvent, 'effect.evaluated event must be recorded');
+      const breakdown = effectEvent!.eventPayload?.effectScoreBreakdown as {
+        total?: number;
+        outcomeComponent?: number;
+        kernelComponent?: number;
+        baselineComponent?: number;
+      } | undefined;
+      assert.ok(breakdown, 'effectScoreBreakdown must be present in event payload');
+      assert.equal(typeof breakdown!.total, 'number');
+      assert.equal(typeof breakdown!.outcomeComponent, 'number');
+      assert.equal(typeof breakdown!.kernelComponent, 'number');
+      assert.equal(typeof breakdown!.baselineComponent, 'number');
+      // failure 必然贡献负向 outcomeComponent。
+      assert.ok((breakdown!.outcomeComponent ?? 0) < 0);
+
+      // 锁定 #2 影子策略契约：strategyPolicyId 与 strategyAlternatives 必须落入 selectedAction。
+      assert.equal(cycleReport.flow.selectedAction?.strategyPolicyId, 'scored-default-v0');
+      const shadowAlternatives = cycleReport.flow.selectedAction?.strategyAlternatives ?? [];
+      assert.ok(shadowAlternatives.length >= 1, 'at least one shadow alternative must be recorded');
+      assert.ok(shadowAlternatives.some((alt) => alt.policyId === 'scored-balanced-v0'));
 
       const forbiddenCycleReport = await fetch(
         `${baseUrl}/api/mobius/students/student-b/learning-cycles/${session.cycleId}/report`,
