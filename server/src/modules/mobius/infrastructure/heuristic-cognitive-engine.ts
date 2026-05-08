@@ -1,3 +1,6 @@
+// heuristic: cognitive-engine.heuristic-projection (v0)
+// 见 server/src/modules/mobius/domain/heuristic-formulas.ts。
+// 这整个文件都是临时投影规则，未来由回归式状态估计器替代。
 import type { CognitiveStateEngine } from '../domain/ports.js';
 import type { LearningSignalInput } from '../domain/types.js';
 import {
