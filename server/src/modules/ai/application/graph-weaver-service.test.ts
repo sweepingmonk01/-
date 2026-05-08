@@ -128,5 +128,9 @@ test('GraphWeaverService builds graph decision context from matched hotspots and
 
   assert.equal(context.matchedHotspots[0]?.label, '几何辅助线');
   assert.ok(context.neighborRecommendations.some((node) => node.label === '倍长中线'));
+  assert.equal(context.priorSignals[0]?.kind, 'matched-hotspot');
+  assert.equal(context.priorSignals[0]?.label, '几何辅助线');
+  assert.ok((context.priorSignals[0]?.probability ?? 0) > 0.5);
+  assert.ok(context.priorSignals.some((node) => node.kind === 'neighbor' && node.label === '倍长中线'));
   assert.ok(context.summary.some((line) => line.includes('图谱热点命中')));
 });

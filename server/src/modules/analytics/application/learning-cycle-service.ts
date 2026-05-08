@@ -1,6 +1,8 @@
-import type { CognitiveState } from '../../mobius/domain/types.js';
+import type { CognitiveState, LearningSignalInput } from '../../mobius/domain/types.js';
 import type {
   LearningCycleEvent,
+  LearningEvidenceEvent,
+  LearningModelEvaluation,
   LearningCycleRecord,
   RecordFoundationExplorationInput,
   RecordInteractionResolutionInput,
@@ -43,6 +45,50 @@ const summarizeCycle = (cycle: LearningCycleRecord) => ({
   createdAt: cycle.createdAt,
   updatedAt: cycle.updatedAt,
 });
+
+const extractSelectedPrediction = (cycle: LearningCycleRecord) => {
+  const selectedStrategy = cycle.selectedAction?.selectedStrategy;
+  const selectedCandidate = cycle.selectedAction?.strategyCandidates?.find((candidate) =>
+    candidate.strategy === selectedStrategy);
+  const probability = selectedCandidate?.expectedUtility?.successProbability;
+
+  if (typeof probability !== 'number' || !Number.isFinite(probability)) return null;
+  if (cycle.outcome !== 'success' && cycle.outcome !== 'failure') return null;
+
+  return {
+    predicted: Math.max(0, Math.min(1, probability / 100)),
+    actual: cycle.outcome === 'success' ? 1 : 0,
+  };
+};
+
+const buildModelEvaluation = (cycles: LearningCycleRecord[]): LearningModelEvaluation => {
+  const predictions = cycles
+    .map(extractSelectedPrediction)
+    .filter((item): item is { predicted: number; actual: number } => Boolean(item));
+  const brierScores = predictions.map((item) => (item.predicted - item.actual) ** 2);
+  const buckets = new Map<string, Array<{ predicted: number; actual: number }>>();
+
+  for (const prediction of predictions) {
+    const floor = Math.floor(prediction.predicted * 5) / 5;
+    const lower = Math.min(0.8, floor);
+    const upper = lower + 0.2;
+    const key = `${Math.round(lower * 100)}-${Math.round(upper * 100)}`;
+    buckets.set(key, [...(buckets.get(key) ?? []), prediction]);
+  }
+
+  return {
+    completedPredictions: predictions.length,
+    averageBrierScore: average(brierScores),
+    calibrationBuckets: Array.from(buckets.entries())
+      .map(([bucket, items]) => ({
+        bucket,
+        count: items.length,
+        averagePredicted: average(items.map((item) => item.predicted)),
+        actualSuccessRate: average(items.map((item) => item.actual)),
+      }))
+      .sort((left, right) => left.bucket.localeCompare(right.bucket)),
+  };
+};
 
 const buildEvaluation = (cycles: LearningCycleRecord[]) => {
   const completed = cycles.filter((cycle) => cycle.outcome === 'success' || cycle.outcome === 'failure');
@@ -88,10 +134,82 @@ const buildEvaluation = (cycles: LearningCycleRecord[]) => {
     averageEffectScore: average(effectScores),
     repeatedPainPoints: painPointTrends.filter((item) => item.attempts > 1),
     painPointTrends,
+    modelEvaluation: buildModelEvaluation(cycles),
   };
 };
 
-const buildFlow = (cycle: LearningCycleRecord, events: LearningCycleEvent[]) => ({
+const summarizeEvidence = (evidence: LearningEvidenceEvent) => ({
+  id: evidence.id,
+  modality: evidence.modality,
+  source: evidence.source,
+  targetNodeKey: evidence.targetNodeKey,
+  painPoint: evidence.painPoint,
+  rule: evidence.rule,
+  confidence: evidence.confidence,
+  observedAt: evidence.observedAt,
+  outcome: evidence.outcome,
+  modelVersion: evidence.modelVersion,
+  privacyLevel: evidence.privacyLevel,
+  payload: evidence.payload,
+});
+
+type NormalizedBehaviorSignal = {
+  key: string;
+  label: string;
+  value: number;
+  unit: 'ms' | 'count' | 'ratio' | 'minutes' | 'bytes' | 'pixels';
+  direction: 'higher-is-risk' | 'lower-is-risk' | 'contextual';
+  severity: 'info' | 'watch' | 'risk';
+};
+
+const finiteNumber = (value: unknown): number | null => (
+  typeof value === 'number' && Number.isFinite(value) ? value : null
+);
+
+const severityFor = (value: number, watchAt: number, riskAt: number): NormalizedBehaviorSignal['severity'] => {
+  if (value >= riskAt) return 'risk';
+  if (value >= watchAt) return 'watch';
+  return 'info';
+};
+
+const buildNormalizedBehaviorSignals = (input: LearningSignalInput | undefined): NormalizedBehaviorSignal[] => {
+  if (!input) return [];
+
+  const signals: NormalizedBehaviorSignal[] = [];
+  const add = (
+    key: string,
+    label: string,
+    value: number | null,
+    unit: NormalizedBehaviorSignal['unit'],
+    direction: NormalizedBehaviorSignal['direction'],
+    severity: NormalizedBehaviorSignal['severity'],
+  ) => {
+    if (value === null) return;
+    signals.push({ key, label, value, unit, direction, severity });
+  };
+
+  add('response-time', '作答耗时', finiteNumber(input.responseTimeMs), 'ms', 'higher-is-risk', severityFor(input.responseTimeMs ?? 0, 45_000, 90_000));
+  add('pause-duration', '停顿时长', finiteNumber(input.pauseDurationMs), 'ms', 'higher-is-risk', severityFor(input.pauseDurationMs ?? 0, 20_000, 45_000));
+  add('input-rhythm', '输入节奏', finiteNumber(input.inputRhythmMs), 'ms', 'contextual', severityFor(input.inputRhythmMs ?? 0, 8_000, 18_000));
+  add('attempts', '尝试次数', finiteNumber(input.attempts), 'count', 'higher-is-risk', severityFor(input.attempts ?? 0, 2, 4));
+  add('retry-frequency', '重试频率', finiteNumber(input.retryFrequency), 'ratio', 'higher-is-risk', severityFor(input.retryFrequency ?? 0, 0.35, 0.65));
+  add('scroll-burst', '滚动突增', finiteNumber(input.scrollBurstCount), 'count', 'higher-is-risk', severityFor(input.scrollBurstCount ?? 0, 3, 6));
+  add('draft-upload', '草稿上传', finiteNumber(input.draftUploadCount), 'count', 'contextual', severityFor(input.draftUploadCount ?? 0, 1, 3));
+  add('wrong-streak', '连续错误', finiteNumber(input.wrongStreak), 'count', 'higher-is-risk', severityFor(input.wrongStreak ?? 0, 1, 3));
+  add('correct-streak', '连续正确', finiteNumber(input.correctStreak), 'count', 'lower-is-risk', 'info');
+  add('time-saved', '节省时间', finiteNumber(input.timeSavedMinutes), 'minutes', 'lower-is-risk', 'info');
+  add('image-width', '题图宽度', finiteNumber(input.imageMetadata?.width), 'pixels', 'contextual', 'info');
+  add('image-height', '题图高度', finiteNumber(input.imageMetadata?.height), 'pixels', 'contextual', 'info');
+  add('image-bytes', '题图大小', finiteNumber(input.imageMetadata?.byteSize), 'bytes', 'contextual', severityFor(input.imageMetadata?.byteSize ?? 0, 3_000_000, 7_000_000));
+
+  return signals;
+};
+
+const buildFlow = (
+  cycle: LearningCycleRecord,
+  events: LearningCycleEvent[],
+  evidenceEvents: LearningEvidenceEvent[],
+) => ({
   stateBefore: cycle.stateBefore,
   hypothesis: cycle.hypothesisSummary,
   selectedAction: cycle.selectedAction,
@@ -101,6 +219,7 @@ const buildFlow = (cycle: LearningCycleRecord, events: LearningCycleEvent[]) => 
     status: cycle.status,
   },
   stateAfter: cycle.stateAfter,
+  evidence: evidenceEvents.map(summarizeEvidence),
   events: events.map((event) => ({
     id: event.id,
     eventType: event.eventType,
@@ -153,6 +272,82 @@ export class LearningCycleService {
         eventPayload: {
           phase: 'session-created',
           selectedAction: toJsonObject(cycle.selectedAction),
+        },
+      });
+    }
+    await this.repository.appendEvidence({
+      studentId: cycle.studentId,
+      cycleId: cycle.id,
+      modality: 'interaction',
+      source: 'mobius.state.prior',
+      painPoint: cycle.painPoint,
+      rule: cycle.rule,
+      confidence: 0.7,
+      observedAt: cycle.createdAt,
+      modelVersion: 'probabilistic-v1',
+      privacyLevel: 'server',
+      payload: {
+        stateBefore: cycle.stateBefore ? toJsonObject(cycle.stateBefore) : undefined,
+        stateVectorVersion: input.stateVectorBefore?.version,
+        stateVector: input.stateVectorBefore ? toJsonObject(input.stateVectorBefore) : undefined,
+      },
+    });
+    const behaviorSignals = buildNormalizedBehaviorSignals(input.learningSignals);
+    if (behaviorSignals.length) {
+      await this.repository.appendEvidence({
+        studentId: cycle.studentId,
+        cycleId: cycle.id,
+        modality: 'interaction',
+        source: 'behavior.signals.normalized',
+        painPoint: cycle.painPoint,
+        rule: cycle.rule,
+        confidence: 0.65,
+        observedAt: cycle.createdAt,
+        modelVersion: 'behavior-signals-v1',
+        privacyLevel: 'server',
+        payload: {
+          signals: behaviorSignals,
+          raw: input.learningSignals,
+        },
+      });
+    }
+    if (cycle.selectedAction) {
+      await this.repository.appendEvidence({
+        studentId: cycle.studentId,
+        cycleId: cycle.id,
+        modality: 'interaction',
+        source: 'mobius.action.selected',
+        painPoint: cycle.painPoint,
+        rule: cycle.rule,
+        confidence: 0.75,
+        observedAt: cycle.createdAt,
+        modelVersion: 'probabilistic-v1',
+        privacyLevel: 'server',
+        payload: {
+          selectedAction: toJsonObject(cycle.selectedAction),
+          selectedStrategy: cycle.selectedAction.selectedStrategy,
+        },
+      });
+    }
+    if (cycle.selectedAction?.graphDecisionContext?.priorSignals.length) {
+      const strongestPrior = cycle.selectedAction.graphDecisionContext.priorSignals[0];
+      await this.repository.appendEvidence({
+        studentId: cycle.studentId,
+        cycleId: cycle.id,
+        modality: 'graph',
+        source: 'graph.prior.applied',
+        targetNodeKey: strongestPrior.key,
+        painPoint: cycle.painPoint,
+        rule: cycle.rule,
+        confidence: strongestPrior.probability,
+        observedAt: cycle.createdAt,
+        modelVersion: 'graph-prior-v1',
+        privacyLevel: 'server',
+        payload: {
+          priorSignals: cycle.selectedAction.graphDecisionContext.priorSignals,
+          matchedHotspots: cycle.selectedAction.graphDecisionContext.matchedHotspots,
+          neighborRecommendations: cycle.selectedAction.graphDecisionContext.neighborRecommendations,
+          summary: cycle.selectedAction.graphDecisionContext.summary,
         },
       });
     }
@@ -239,6 +434,31 @@ export class LearningCycleService {
         effectScore: cycle.effectScore,
       },
     });
+    await this.repository.appendEvidence({
+      studentId: cycle.studentId,
+      cycleId: cycle.id,
+      modality: 'transfer',
+      source: 'foundation.exploration.outcome',
+      targetNodeKey: input.nodeKey,
+      painPoint: cycle.painPoint,
+      rule: cycle.rule,
+      confidence: 0.8,
+      observedAt: cycle.updatedAt,
+      outcome: input.outcome,
+      modelVersion: 'probabilistic-v1',
+      privacyLevel: 'server',
+      payload: {
+        domain: input.domain,
+        taskId: input.taskId,
+        taskLabel: input.taskLabel,
+        actionType: input.actionType,
+        stateBefore: toJsonObject(input.stateBefore),
+        stateAfter: toJsonObject(input.stateAfter),
+        stateVectorBeforeVersion: input.stateVectorBefore?.version,
+        stateVectorAfterVersion: input.stateVectorAfter?.version,
+        note: input.note,
+      },
+    });
 
     return cycle;
   }
@@ -298,6 +518,30 @@ export class LearningCycleService {
         },
       });
     }
+    await this.repository.appendEvidence({
+      studentId: updated.studentId,
+      cycleId: updated.id,
+      modality: 'interaction',
+      source: 'mobius.interaction.outcome',
+      painPoint: updated.painPoint,
+      rule: updated.rule,
+      confidence: 0.85,
+      observedAt: updated.updatedAt,
+      outcome: input.outcome,
+      modelVersion: 'probabilistic-v1',
+      privacyLevel: 'server',
+      payload: {
+        stateBefore: input.stateBefore ? toJsonObject(input.stateBefore) : undefined,
+        stateAfter: toJsonObject(input.stateAfter),
+        stateVectorBeforeVersion: input.stateVectorBefore?.version,
+        stateVectorAfterVersion: input.stateVectorAfter?.version,
+        selectedAction: cycle.selectedAction ? toJsonObject(cycle.selectedAction) : undefined,
+        followupStrategyDecision: input.followupStrategyDecision ? toJsonObject(input.followupStrategyDecision) : undefined,
+        actionType: input.actionType,
+        submission: input.submission ? toJsonObject(input.submission) : undefined,
+        adjudication: input.adjudication ? toJsonObject(input.adjudication) : undefined,
+      },
+    });
 
     return updated;
   }
@@ -347,6 +591,21 @@ export class LearningCycleService {
         hypothesisSummary: toJsonObject(input.hypothesisSummary),
       },
     });
+    await this.repository.appendEvidence({
+      studentId: updated.studentId,
+      cycleId: updated.id,
+      modality: 'diagnosis',
+      source: 'hypothesis.posterior',
+      painPoint: updated.painPoint,
+      rule: updated.rule,
+      confidence: input.hypothesisSummary.selectedHypothesis?.confidence ?? 0.5,
+      observedAt: updated.updatedAt,
+      modelVersion: input.hypothesisSummary.source,
+      privacyLevel: 'server',
+      payload: {
+        hypothesisSummary: toJsonObject(input.hypothesisSummary),
+      },
+    });
 
     return updated;
   }
@@ -370,11 +629,12 @@ export class LearningCycleService {
     if (!cycle || cycle.studentId !== studentId) return null;
 
     const events = await this.repository.listEvents(cycleId);
+    const evidenceEvents = await this.repository.listEvidenceByCycle(cycleId);
 
     return {
       studentId,
       cycle: summarizeCycle(cycle),
-      flow: buildFlow(cycle, events),
+      flow: buildFlow(cycle, events, evidenceEvents),
     };
   }
 }

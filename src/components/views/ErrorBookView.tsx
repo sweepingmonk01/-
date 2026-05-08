@@ -120,7 +120,7 @@ export default function ErrorBookView({
       exit={{ opacity: 0, x: -20 }}
       className="vl-page absolute inset-0 flex h-full w-full min-h-0 flex-col overflow-hidden pb-24"
     >
-      <div className="flex-1 min-h-0 overflow-y-auto p-5 pt-8 touch-pan-y">
+      <div className="yufeng-scroll-pane flex-1 min-h-0 p-5 pt-8">
         <MissionBadge tone="main" icon={<ScrollText size={14} />}>修复委托所</MissionBadge>
         <h2 className="mt-4 flex items-center gap-2 text-3xl font-display font-bold text-[#1a1a2e]">
           今日错题任务卷轴

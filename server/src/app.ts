@@ -20,8 +20,8 @@ import { ContentController } from './modules/content/presentation/content-contro
 import { FirebaseTokenVerifier } from './modules/auth/application/firebase-token-verifier.js';
 import { createMobiusAuthMiddleware } from './modules/auth/presentation/mobius-auth-middleware.js';
 import { MobiusOrchestrator } from './modules/mobius/application/mobius-orchestrator.js';
-import { HeuristicCognitiveEngine } from './modules/mobius/infrastructure/heuristic-cognitive-engine.js';
 import { HeuristicStoryPlanner } from './modules/mobius/infrastructure/heuristic-story-planner.js';
+import { ProbabilisticCognitiveEngine } from './modules/mobius/infrastructure/probabilistic-cognitive-engine.js';
 import { ScoredStrategyScheduler } from './modules/mobius/infrastructure/scored-strategy-scheduler.js';
 import { FileMediaJobRepository } from './modules/mobius/infrastructure/file-media-job-repository.js';
 import { SQLiteMediaJobRepository } from './modules/mobius/infrastructure/sqlite-media-job-repository.js';
@@ -110,24 +110,6 @@ export const createMobiusApp = () => {
     updateEngine: stateUpdateEngine,
   });
 
-  const orchestrator = new MobiusOrchestrator({
-    cognitiveEngine: new HeuristicCognitiveEngine(),
-    storyPlanner: new HeuristicStoryPlanner(),
-    videoClient,
-    mediaJobs,
-    studentStates,
-    stateVectors: stateVectorService,
-    updateEngine: stateUpdateEngine,
-    strategyScheduler: new ScoredStrategyScheduler(),
-    learningCycles,
-  });
-
-  const studentStateSummaryService = new StudentStateSummaryService({
-    repository: studentStates,
-    stateVectors: stateVectorService,
-  });
-  const studentStateController = new StudentStateController(studentStateSummaryService);
-  
   // Setup sqlite profile repo regardless of purely file configurations since DB must be resilient
   const profileRepo = new SQLiteStudentProfileRepository({
     dbFile: path.resolve(env.sqliteDbFile),
@@ -159,6 +141,23 @@ export const createMobiusApp = () => {
     agentJobs: agentJobRepository,
     errorRecords: profileRepo,
   });
+  const orchestrator = new MobiusOrchestrator({
+    cognitiveEngine: new ProbabilisticCognitiveEngine(),
+    storyPlanner: new HeuristicStoryPlanner(),
+    videoClient,
+    mediaJobs,
+    studentStates,
+    stateVectors: stateVectorService,
+    updateEngine: stateUpdateEngine,
+    strategyScheduler: new ScoredStrategyScheduler(),
+    learningCycles,
+    graphContextProvider: graphWeaverService,
+  });
+  const studentStateSummaryService = new StudentStateSummaryService({
+    repository: studentStates,
+    stateVectors: stateVectorService,
+  });
+  const studentStateController = new StudentStateController(studentStateSummaryService);
   const strategicPlannerService = coachService ? new StrategicPlannerService({
     coachService,
     profileRepo,

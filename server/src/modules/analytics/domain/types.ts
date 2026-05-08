@@ -1,11 +1,31 @@
-import type { CognitiveState, InteractionOutcome, InteractionSubmission } from '../../mobius/domain/types.js';
+import type { CognitiveState, InteractionOutcome, InteractionSubmission, LearningSignalInput } from '../../mobius/domain/types.js';
 import type { KnowledgeAction } from '../../learning/domain/protocol.js';
 import type { StudentStateVector } from '../../student-state/domain/types.js';
-import type { HypothesisSummary } from '../../ai/domain/types.js';
+import type { HypothesisSummary, KnowledgeGraphDecisionContext } from '../../ai/domain/types.js';
 import type { StrategyCandidate, StrategyDecision, StrategyKind } from '../../mobius/domain/types.js';
 
 export type LearningCycleSource = 'mobius-session' | 'foundation-science-exploration';
 export type LearningCycleStatus = 'started' | 'validated' | 'diagnosed' | 'closed';
+export type LearningEvidenceModality = 'text' | 'image' | 'interaction' | 'graph' | 'diagnosis' | 'transfer';
+export type LearningEvidencePrivacyLevel = 'local' | 'server' | 'redacted';
+
+export interface LearningEvidenceEvent {
+  id: string;
+  studentId: string;
+  cycleId?: string;
+  modality: LearningEvidenceModality;
+  source: string;
+  targetNodeKey?: string;
+  painPoint?: string;
+  rule?: string;
+  confidence: number;
+  observedAt: string;
+  outcome?: InteractionOutcome | 'partial';
+  modelVersion?: string;
+  privacyLevel: LearningEvidencePrivacyLevel;
+  payload: Record<string, unknown>;
+  createdAt: string;
+}
 
 export interface LearningCycleRecord {
   id: string;
@@ -26,12 +46,24 @@ export interface LearningCycleRecord {
     emotion?: string;
     selectedStrategy?: StrategyKind;
     strategyCandidates?: StrategyCandidate[];
+    graphDecisionContext?: KnowledgeGraphDecisionContext;
   };
   outcome?: InteractionOutcome;
   effectScore?: number;
   createdAt: string;
   updatedAt: string;
   closedAt?: string;
+}
+
+export interface LearningModelEvaluation {
+  completedPredictions: number;
+  averageBrierScore: number;
+  calibrationBuckets: Array<{
+    bucket: string;
+    count: number;
+    averagePredicted: number;
+    actualSuccessRate: number;
+  }>;
 }
 
 export type LearningCycleEventType =
@@ -63,6 +95,7 @@ export interface StartLearningCycleInput {
   knowledgeActionId?: string;
   stateBefore: CognitiveState;
   stateVectorBefore?: StudentStateVector;
+  learningSignals?: LearningSignalInput;
   selectedAction?: LearningCycleRecord['selectedAction'];
 }
 

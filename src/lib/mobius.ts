@@ -16,8 +16,18 @@ export interface MobiusSessionRequest {
   previousState?: CompatibleCognitiveState;
   learningSignals?: {
     responseTimeMs?: number;
+    pauseDurationMs?: number;
+    inputRhythmMs?: number;
     attempts?: number;
+    retryFrequency?: number;
     scrollBurstCount?: number;
+    draftUploadCount?: number;
+    imageMetadata?: {
+      width?: number;
+      height?: number;
+      mimeType?: string;
+      byteSize?: number;
+    };
     correctStreak?: number;
     wrongStreak?: number;
     timeSavedMinutes?: number;
@@ -70,6 +80,7 @@ export type StrategyFeatureKey =
   | 'noisePressure'
   | 'emotionRisk'
   | 'masteryGap'
+  | 'graphPriorPressure'
   | 'recentFailurePressure'
   | 'recentSuccessRecovery';
 
@@ -87,6 +98,10 @@ export interface StrategyCandidate {
   baseScore: number;
   score: number;
   scoreBreakdown: StrategyScoreBreakdown;
+  expectedUtility?: {
+    successProbability: number;
+    utilityBonus: number;
+  };
   rationale: string;
 }
 
@@ -227,7 +242,7 @@ export interface HypothesisIntervention {
 }
 
 export interface HypothesisUpdateResult {
-  source: 'heuristic-v1';
+  source: 'heuristic-v1' | 'probabilistic-v1';
   updatedAt: string;
   updates: HypothesisConfidenceUpdate[];
   selectedHypothesis?: HypothesisCandidate;
@@ -236,7 +251,7 @@ export interface HypothesisUpdateResult {
 }
 
 export interface HypothesisSummary {
-  source: 'heuristic-v1';
+  source: 'heuristic-v1' | 'probabilistic-v1';
   generatedAt: string;
   candidates: HypothesisCandidate[];
   selectedHypothesis?: HypothesisCandidate;
@@ -292,10 +307,16 @@ export interface KnowledgeGraphDecisionNode {
   anchorLabel?: string;
 }
 
+export interface KnowledgeGraphPriorSignal extends KnowledgeGraphDecisionNode {
+  kind: 'matched-hotspot' | 'neighbor' | 'top-hotspot';
+  probability: number;
+}
+
 export interface KnowledgeGraphDecisionContext {
   topHotspots: KnowledgeGraphDecisionNode[];
   matchedHotspots: KnowledgeGraphDecisionNode[];
   neighborRecommendations: KnowledgeGraphDecisionNode[];
+  priorSignals: KnowledgeGraphPriorSignal[];
   summary: string[];
 }
 

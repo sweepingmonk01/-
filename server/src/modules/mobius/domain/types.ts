@@ -1,5 +1,5 @@
 import type { DiagnosedMistakePattern, ErrorRecord, KnowledgeAction } from '../../learning/domain/protocol.js';
-import type { SocraticThread } from '../../ai/domain/types.js';
+import type { KnowledgeGraphDecisionContext, SocraticThread } from '../../ai/domain/types.js';
 import type { StudentStateVector } from '../../student-state/domain/types.js';
 import type {
   CognitiveState,
@@ -11,8 +11,18 @@ export type { CognitiveState, CompatibleCognitiveState, LegacyCognitiveState } f
 
 export interface LearningSignalInput {
   responseTimeMs?: number;
+  pauseDurationMs?: number;
+  inputRhythmMs?: number;
   attempts?: number;
+  retryFrequency?: number;
   scrollBurstCount?: number;
+  draftUploadCount?: number;
+  imageMetadata?: {
+    width?: number;
+    height?: number;
+    mimeType?: string;
+    byteSize?: number;
+  };
   correctStreak?: number;
   wrongStreak?: number;
   timeSavedMinutes?: number;
@@ -51,6 +61,7 @@ export type StrategyFeatureKey =
   | 'noisePressure'
   | 'emotionRisk'
   | 'masteryGap'
+  | 'graphPriorPressure'
   | 'recentFailurePressure'
   | 'recentSuccessRecovery';
 
@@ -68,6 +79,10 @@ export interface StrategyCandidate {
   baseScore: number;
   score: number;
   scoreBreakdown: StrategyScoreBreakdown;
+  expectedUtility?: {
+    successProbability: number;
+    utilityBonus: number;
+  };
   rationale: string;
 }
 
@@ -80,6 +95,7 @@ export interface StrategySchedulerInput {
   context: StudentContext;
   cognitiveState: CognitiveState;
   stateVector?: StudentStateVector | null;
+  graphDecisionContext?: KnowledgeGraphDecisionContext;
 }
 
 export type InteractionOutcome = 'success' | 'failure';

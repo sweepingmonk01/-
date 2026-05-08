@@ -40,6 +40,7 @@ test('SocraticDiagnosticService closes after three user turns', async () => {
         topHotspots: [{ key: 'fraction-lcm', label: '最小公倍数', weight: 3 }],
         matchedHotspots: [{ key: 'fraction-common-denominator', label: '分母不一致', weight: 2 }],
         neighborRecommendations: [{ key: 'fraction-lcm', label: '最小公倍数', weight: 3, relationWeight: 8, anchorKey: 'fraction-common-denominator', anchorLabel: '分母不一致' }],
+        priorSignals: [{ key: 'fraction-common-denominator', label: '分母不一致', weight: 2, kind: 'matched-hotspot', probability: 0.68 }],
         summary: ['图谱热点命中：分母不一致', '相邻修复建议：最小公倍数 <- 分母不一致'],
       }),
     } as any,
@@ -55,7 +56,7 @@ test('SocraticDiagnosticService closes after three user turns', async () => {
   assert.equal(thread.messages.length, 1);
   assert.match(thread.messages[0]?.content ?? '', /当前最高风险猜想/);
   assert.match(thread.messages[0]?.content ?? '', /图谱热点命中/);
-  assert.equal(thread.hypothesisSummary?.source, 'heuristic-v1');
+  assert.equal(thread.hypothesisSummary?.source, 'probabilistic-v1');
   assert.ok(thread.hypothesisSummary?.selectedHypothesis);
 
   const reply1 = await service.reply(thread.id, '我第一眼没看到分母不一样。');

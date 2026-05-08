@@ -134,7 +134,7 @@ export interface HypothesisCandidate {
 }
 
 export interface HypothesisSummary {
-  source: 'heuristic-v1';
+  source: 'heuristic-v1' | 'probabilistic-v1';
   generatedAt: string;
   candidates: HypothesisCandidate[];
   selectedHypothesis?: HypothesisCandidate;
@@ -161,7 +161,7 @@ export interface HypothesisIntervention {
 }
 
 export interface HypothesisUpdateResult {
-  source: 'heuristic-v1';
+  source: 'heuristic-v1' | 'probabilistic-v1';
   updatedAt: string;
   updates: HypothesisConfidenceUpdate[];
   selectedHypothesis?: HypothesisCandidate;
@@ -264,9 +264,15 @@ export interface KnowledgeGraphDecisionNode {
   anchorLabel?: string;
 }
 
+export interface KnowledgeGraphPriorSignal extends KnowledgeGraphDecisionNode {
+  kind: 'matched-hotspot' | 'neighbor' | 'top-hotspot';
+  probability: number;
+}
+
 export interface KnowledgeGraphDecisionContext {
   topHotspots: KnowledgeGraphDecisionNode[];
   matchedHotspots: KnowledgeGraphDecisionNode[];
   neighborRecommendations: KnowledgeGraphDecisionNode[];
+  priorSignals: KnowledgeGraphPriorSignal[];
   summary: string[];
 }
