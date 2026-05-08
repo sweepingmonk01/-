@@ -563,7 +563,8 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
       assert.ok(cyclesPayload.evaluation.completedCycles >= 1);
       assert.ok(cyclesPayload.evaluation.failureCount >= 1);
       assert.equal(cyclesPayload.evaluation.successRate, 0);
-      assert.equal(cyclesPayload.evaluation.averageEffectScore, 0);
+      // 自 v0 effect-score-engine 起，全失败的均值 effectScore 必为非正数。
+      assert.ok(cyclesPayload.evaluation.averageEffectScore <= 0);
       assert.ok(cyclesPayload.evaluation.painPointTrends.some((item) => item.painPoint === '几何辅助线'));
       assert.ok(cyclesPayload.cycles.some((item) => item.id === session.cycleId));
 
@@ -591,7 +592,10 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
       };
       assert.equal(cycleReport.cycle.id, session.cycleId);
       assert.equal(cycleReport.flow.result.outcome, 'failure');
-      assert.equal(cycleReport.flow.result.effectScore, 0);
+      // 自 v0 effect-score-engine 起，failure 至少贡献 -W_OUTCOME = -0.5；
+      // 这里只断言为非 undefined 的非正数，避免与 kernel/baseline 分量耦合。
+      assert.ok(typeof cycleReport.flow.result.effectScore === 'number');
+      assert.ok((cycleReport.flow.result.effectScore ?? 0) <= 0);
       assert.ok(cycleReport.flow.stateBefore);
       assert.ok(cycleReport.flow.stateAfter);
       assert.ok(cycleReport.flow.hypothesis);
