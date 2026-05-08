@@ -52,6 +52,7 @@ export interface DashboardCognitiveProjection {
   emotion: number;
   bottleneck: CognitiveBottleneck;
   bottleneckLabel: string;
+  bottleneckAdvice: string;
   radar: DashboardRadarDatum[];
 }
 
@@ -187,6 +188,19 @@ export const getCognitiveBottleneckLabel = (value: CognitiveBottleneck): string 
   cognitiveBottleneckLabels[value]
 );
 
+// 把瓶颈翻译成"下一步动作建议"。
+// 这是把 AI Active 内核从抽象的三轴数值，落到学生能直接看到的可执行指引。
+const cognitiveBottleneckAdvice: Record<CognitiveBottleneck, string> = {
+  time: '先做 1-2 道短题型，把节奏抓回来。',
+  signalNoiseRatio: '先复现一次主线规则，把噪声压下去。',
+  emotion: '先做 1 题低难度，恢复推进意愿。',
+  stable: '可以小步扩张题型，巩固当前节奏。',
+};
+
+export const getCognitiveBottleneckAdvice = (value: CognitiveBottleneck): string => (
+  cognitiveBottleneckAdvice[value]
+);
+
 export const projectDashboardRadarState = (value: CompatibleCognitiveState): DashboardCognitiveProjection => {
   const state = normalizeCognitiveState(value);
   const bottleneck = getCognitiveBottleneck(state);
@@ -197,6 +211,7 @@ export const projectDashboardRadarState = (value: CompatibleCognitiveState): Das
     emotion: state.kernel.emotion,
     bottleneck,
     bottleneckLabel: getCognitiveBottleneckLabel(bottleneck),
+    bottleneckAdvice: getCognitiveBottleneckAdvice(bottleneck),
     radar: [
       { key: 'time', subject: '时间', value: state.kernel.time, fullMark: 100 },
       { key: 'signalNoiseRatio', subject: '信噪比', value: state.kernel.signalNoiseRatio, fullMark: 100 },

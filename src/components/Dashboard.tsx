@@ -213,6 +213,21 @@ export default function Dashboard({
                     <Radar name="State" dataKey="A" stroke="#7dd3fc" fill="#7dd3fc" fillOpacity={0.32} />
                   </RadarChart>
                 </ResponsiveContainer>
+                <div className="mt-1 grid grid-cols-3 gap-1 text-center">
+                  {data.cognitiveProjection.radar.map((axis) => (
+                    <div
+                      key={axis.key}
+                      className={`rounded-md border border-white/12 px-1 py-0.5 ${
+                        axis.key === data.cognitiveProjection.bottleneck
+                          ? 'bg-red-400/20 text-red-50'
+                          : 'bg-white/8 text-cyan-50'
+                      }`}
+                    >
+                      <p className="text-[8px] font-bold uppercase tracking-[0.08em] text-white/60">{axis.subject}</p>
+                      <p className="text-[13px] font-black leading-none">{axis.value}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             </motion.section>
 
@@ -238,6 +253,9 @@ export default function Dashboard({
               <div className="mt-1.5 rounded-xl bg-[linear-gradient(180deg,#fff4ea_0%,#f7f9ff_100%)] px-2 py-1.5">
                 <p className="text-[9px] font-black uppercase tracking-[0.12em] text-gray-400">Core Status</p>
                 <p className="mt-0.5 text-[10px] font-bold leading-4 text-[#1a1a2e]">{priorityTargets[0]}</p>
+                <p className="mt-1 text-[10px] font-medium leading-4 text-[var(--color-primary)]">
+                  {data.cognitiveProjection.bottleneckAdvice}
+                </p>
               </div>
             </motion.section>
           </div>
