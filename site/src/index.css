@@ -1,0 +1,42 @@
+@import 'tailwindcss';
+
+:root {
+  /* AIU Brand Palette — 教育公益 + 东方探索 */
+  --aiu-sky: #e8f4ff;
+  --aiu-sky-deep: #4a9eff;
+  --aiu-ocean: #1a3a5c;
+  --aiu-ocean-deep: #0d1f33;
+  --aiu-gold: #f5a623;
+  --aiu-gold-soft: rgba(245, 166, 35, 0.14);
+  --aiu-emerald: #34c78a;
+  --aiu-emerald-soft: rgba(52, 199, 138, 0.14);
+  --aiu-coral: #ff6b6b;
+  --aiu-lavender: #a371ff;
+  --aiu-ink: #1a1a2e;
+  --aiu-ink-soft: #4a5568;
+  --aiu-cloud: #f8fafc;
+  --aiu-line: rgba(26, 58, 92, 0.08);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html {
+  scroll-behavior: smooth;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: 'Inter', 'Noto Sans SC', system-ui, -apple-system, sans-serif;
+  color: var(--aiu-ink);
+  background: #ffffff;
+  line-height: 1.6;
+}
+
+::selection {
+  background: rgba(74, 158, 255, 0.2);
+}
