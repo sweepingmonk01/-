@@ -3,6 +3,7 @@ build/
 dist/
 coverage/
 .codex-artifacts/
+.claude/
 .DS_Store
 *.log
 .env*
