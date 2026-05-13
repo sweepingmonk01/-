@@ -102,6 +102,8 @@ export class MobiusOrchestrator {
         selectedStrategy: story.strategyDecision.selectedStrategy,
         strategyCandidates: story.strategyDecision.candidates,
         graphDecisionContext,
+        strategyPolicyId: story.strategyDecision.policyId,
+        strategyAlternatives: story.strategyDecision.alternatives,
       },
     });
 

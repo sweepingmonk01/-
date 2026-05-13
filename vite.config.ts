@@ -27,6 +27,15 @@ export default defineConfig(({mode}) => {
       'process.env.GEMINI_API_KEY': JSON.stringify(env.GEMINI_API_KEY),
       'process.env.MOBIUS_API_BASE_URL': JSON.stringify(env.MOBIUS_API_BASE_URL || ''),
     },
+    test: {
+      // Vitest 只跑 client-side 测试（src/ 下的 .test.ts / .test.tsx）。
+      // server/ 和 shared/ 用 node:test 运行器，不经过 Vitest。
+      // 所有测试文件当前使用 node:test（由 `npx tsx --test` 运行），
+      // 不经过 Vitest。未来如需 browser/jsdom 测试可用 *.vitest.ts 约定。
+      include: ['src/**/*.vitest.{ts,tsx}'],
+      exclude: ['server/**', 'shared/**', 'tmp_repo/**', 'node_modules/**'],
+      passWithNoTests: true,
+    },
     build: {
       rollupOptions: {
         output: {

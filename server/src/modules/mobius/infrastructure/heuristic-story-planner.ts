@@ -1,3 +1,6 @@
+// heuristic: story-planner.heuristic-branching (v0)
+// 见 server/src/modules/mobius/domain/heuristic-formulas.ts。
+// 整个文件都是 emotion-label 驱动的分支表，未来由 LLM 编排器替代。
 import type { StoryPlanner } from '../domain/ports.js';
 import type { CognitiveState, StoryBeatPlan, StrategyDecision, StudentContext } from '../domain/types.js';
 

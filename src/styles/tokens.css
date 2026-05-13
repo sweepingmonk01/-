@@ -26,4 +26,36 @@
   --vl-shadow-cloud: 0 18px 36px rgba(72, 112, 170, 0.14);
   --vl-shadow-parchment: 0 16px 30px rgba(93, 64, 28, 0.1);
   --vl-shadow-island: 0 18px 30px rgba(34, 63, 106, 0.18);
+
+  /*
+   * 六层机制 design tokens.
+   * 任何 UI 元素的颜色选择必须先回答"它属于哪一层机制"，再从对应的 token 取值。
+   * 这是把"颜色不统一"问题从美术问题转成信息架构问题的关键约束。
+   *
+   * 目标 / 规则 / 反馈 / 成长 / 社交 / 运营 各对应一组 strong / soft / ink 三档。
+   * 视觉语言保留东方探索调（云雾、羊皮、水彩），机制层只规定语义。
+   */
+  --vl-mech-goal-strong: #3d7bff;
+  --vl-mech-goal-soft: rgba(61, 123, 255, 0.14);
+  --vl-mech-goal-ink: #1f3f8a;
+
+  --vl-mech-rule-strong: #4fd6e6;
+  --vl-mech-rule-soft: rgba(79, 214, 230, 0.16);
+  --vl-mech-rule-ink: #0e8197;
+
+  --vl-mech-feedback-strong: #33d1a0;
+  --vl-mech-feedback-soft: rgba(51, 209, 160, 0.14);
+  --vl-mech-feedback-ink: #136d56;
+
+  --vl-mech-growth-strong: #ffb84d;
+  --vl-mech-growth-soft: rgba(255, 184, 77, 0.16);
+  --vl-mech-growth-ink: #8a5a06;
+
+  --vl-mech-social-strong: #ff5fa2;
+  --vl-mech-social-soft: rgba(255, 95, 162, 0.14);
+  --vl-mech-social-ink: #a8265e;
+
+  --vl-mech-ops-strong: #a371ff;
+  --vl-mech-ops-soft: rgba(163, 113, 255, 0.14);
+  --vl-mech-ops-ink: #5a2caa;
 }

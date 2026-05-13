@@ -1,3 +1,6 @@
+// heuristic: strategy.policy-features (v0)
+// 见 server/src/modules/mobius/domain/heuristic-formulas.ts。
+// 6 维特征的 resolve 函数与 weights 矩阵均为 v0 工程估值。
 import type {
   StrategyFeatureKey,
   StrategyKind,

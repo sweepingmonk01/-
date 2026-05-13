@@ -86,9 +86,19 @@ export interface StrategyCandidate {
   rationale: string;
 }
 
+export interface StrategyAlternative {
+  policyId: string;
+  selectedStrategy: StrategyKind;
+  candidates: StrategyCandidate[];
+}
+
 export interface StrategyDecision {
   candidates: StrategyCandidate[];
   selectedStrategy: StrategyKind;
+  // 主策略来源标识。未配置 ShadowStrategyScheduler 时可省略。
+  policyId?: string;
+  // 影子策略的并行决策，仅用于离线对比与 effectScore 反向回归，不参与编排。
+  alternatives?: StrategyAlternative[];
 }
 
 export interface StrategySchedulerInput {

@@ -490,6 +490,33 @@ export interface MobiusStudentStateSummaryResponse {
     lastOutcome?: 'success' | 'failure';
   };
   currentCognitiveState?: CognitiveState;
+  lastInteractionDiff?: {
+    occurredAt: string;
+    outcome: 'success' | 'failure';
+    before: { time: number; signalNoiseRatio: number; emotion: number };
+    after: { time: number; signalNoiseRatio: number; emotion: number };
+    delta: { time: number; signalNoiseRatio: number; emotion: number };
+  };
+  topMasteryNodes?: Array<{
+    key: string;
+    label: string;
+    score: number;
+    confidence: number;
+    lastEvidenceAt?: string;
+  }>;
+  weeklyRhythm?: {
+    days: Array<{
+      dateISO: string;
+      dayKey: 'mon' | 'tue' | 'wed' | 'thu' | 'fri' | 'sat' | 'sun';
+      dayLabel: string;
+      completedCycles: number;
+      isToday: boolean;
+      isFuture: boolean;
+    }>;
+    weekTotal: number;
+    weekTarget: number;
+    streakDays: number;
+  };
   recentPainPoints: string[];
   activeRules: string[];
   mistakeCategoryCounts: Partial<Record<MistakeCategory, number>>;

@@ -2,7 +2,12 @@ import type { CognitiveState, InteractionOutcome, InteractionSubmission, Learnin
 import type { KnowledgeAction } from '../../learning/domain/protocol.js';
 import type { StudentStateVector } from '../../student-state/domain/types.js';
 import type { HypothesisSummary, KnowledgeGraphDecisionContext } from '../../ai/domain/types.js';
-import type { StrategyCandidate, StrategyDecision, StrategyKind } from '../../mobius/domain/types.js';
+import type {
+  StrategyAlternative,
+  StrategyCandidate,
+  StrategyDecision,
+  StrategyKind,
+} from '../../mobius/domain/types.js';
 
 export type LearningCycleSource = 'mobius-session' | 'foundation-science-exploration';
 export type LearningCycleStatus = 'started' | 'validated' | 'diagnosed' | 'closed';
@@ -47,6 +52,8 @@ export interface LearningCycleRecord {
     selectedStrategy?: StrategyKind;
     strategyCandidates?: StrategyCandidate[];
     graphDecisionContext?: KnowledgeGraphDecisionContext;
+    strategyPolicyId?: string;
+    strategyAlternatives?: StrategyAlternative[];
   };
   outcome?: InteractionOutcome;
   effectScore?: number;

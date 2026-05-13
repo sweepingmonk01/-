@@ -1,22 +1,114 @@
 import type { MistakeCategory } from '../../learning/domain/protocol.js';
+import { normalizeCognitiveState } from '../../../../../shared/cognitive-state.js';
+import { buildWeeklyRhythm } from '../../../../../shared/weekly-rhythm.js';
 import type { StudentStateRepository } from '../domain/ports.js';
-import type { StudentStateSummary } from '../domain/types.js';
+import type {
+  InteractionKernelDiff,
+  StudentStateSnapshot,
+  StudentStateSummary,
+  StudentStateVector,
+  TopMasteryNode,
+} from '../domain/types.js';
 import { StateVectorService } from './state-vector-service.js';
+
+const TOP_MASTERY_LIMIT = 5;
+
+const buildLabelLookup = (snapshots: StudentStateSnapshot[]): Map<string, string> => {
+  const lookup = new Map<string, string>();
+  // 倒序遍历：最近的 snapshot 决定 label，避免被旧的 painPoint 覆盖。
+  for (let index = snapshots.length - 1; index >= 0; index -= 1) {
+    const snapshot = snapshots[index];
+    const knowledgeKey = snapshot.profile.knowledgeActionId ?? snapshot.profile.rule;
+    if (!knowledgeKey || lookup.has(knowledgeKey)) continue;
+    const label = snapshot.profile.painPoint?.trim() || snapshot.profile.rule || knowledgeKey;
+    lookup.set(knowledgeKey, label);
+  }
+  return lookup;
+};
+
+const computeTopMasteryNodes = (
+  vector: StudentStateVector,
+  snapshots: StudentStateSnapshot[],
+): TopMasteryNode[] => {
+  const labelLookup = buildLabelLookup(snapshots);
+  const entries = Object.entries(vector.mastery);
+  if (entries.length === 0) return [];
+  // 按"证据强度 = score × (0.5 + confidence/2)" 排序，让 confidence 起到权重作用。
+  return entries
+    .map(([key, mastery]) => ({
+      key,
+      label: labelLookup.get(key) ?? key,
+      score: mastery.score,
+      confidence: mastery.confidence,
+      lastEvidenceAt: mastery.lastEvidenceAt,
+    }))
+    .sort((left, right) => {
+      const leftWeight = left.score * (0.5 + left.confidence / 2);
+      const rightWeight = right.score * (0.5 + right.confidence / 2);
+      return rightWeight - leftWeight;
+    })
+    .slice(0, TOP_MASTERY_LIMIT);
+};
 
 interface StudentStateSummaryServiceDeps {
   repository: StudentStateRepository;
   stateVectors: StateVectorService;
 }
 
+const computeLastInteractionDiff = (
+  snapshots: StudentStateSnapshot[],
+): InteractionKernelDiff | undefined => {
+  if (snapshots.length < 2) return undefined;
+  const ordered = [...snapshots].sort((left, right) => left.createdAt.localeCompare(right.createdAt));
+  for (let index = ordered.length - 1; index >= 1; index -= 1) {
+    const candidate = ordered[index];
+    if (candidate.source !== 'interaction-resolved') continue;
+    if (!candidate.interactionOutcome) continue;
+    const previous = ordered[index - 1];
+    const beforeKernel = normalizeCognitiveState(previous.cognitiveState).kernel;
+    const afterKernel = normalizeCognitiveState(candidate.cognitiveState).kernel;
+    return {
+      occurredAt: candidate.createdAt,
+      outcome: candidate.interactionOutcome,
+      before: {
+        time: beforeKernel.time,
+        signalNoiseRatio: beforeKernel.signalNoiseRatio,
+        emotion: beforeKernel.emotion,
+      },
+      after: {
+        time: afterKernel.time,
+        signalNoiseRatio: afterKernel.signalNoiseRatio,
+        emotion: afterKernel.emotion,
+      },
+      delta: {
+        time: afterKernel.time - beforeKernel.time,
+        signalNoiseRatio: afterKernel.signalNoiseRatio - beforeKernel.signalNoiseRatio,
+        emotion: afterKernel.emotion - beforeKernel.emotion,
+      },
+    };
+  }
+  return undefined;
+};
+
 export class StudentStateSummaryService {
   constructor(private readonly deps: StudentStateSummaryServiceDeps) {}
 
   async getStudentStateSummary(studentId: string): Promise<StudentStateSummary | null> {
-    const [vector, latest] = await Promise.all([
+    const [vector, latest, recentSnapshots] = await Promise.all([
       this.deps.stateVectors.getCurrentVector(studentId),
       this.deps.repository.getLatestByStudent(studentId),
+      // 拉取 60 条覆盖最近 ~1 周的高强度使用，用于 lastInteractionDiff /
+      // topMasteryNodes label / weeklyRhythm 三个 ops 派生。
+      this.deps.repository.listByStudent(studentId, 60, 0),
     ]);
     if (!vector || !latest) return null;
+    const lastInteractionDiff = computeLastInteractionDiff(recentSnapshots);
+    const topMasteryNodes = computeTopMasteryNodes(vector, recentSnapshots);
+    const weeklyRhythm = buildWeeklyRhythm({
+      resolvedAtIsoList: recentSnapshots
+        .filter((snapshot) => snapshot.source === 'interaction-resolved')
+        .map((snapshot) => snapshot.createdAt),
+    });
 
     let stats = {
       totalSnapshots: vector.snapshotCount,
@@ -41,6 +133,9 @@ export class StudentStateSummaryService {
         lastOutcome: vector.sessionContext.latestInteractionOutcome,
       },
       currentCognitiveState: vector.cognitive,
+      lastInteractionDiff,
+      topMasteryNodes: topMasteryNodes.length > 0 ? topMasteryNodes : undefined,
+      weeklyRhythm,
       recentPainPoints: vector.recentPainPoints,
       activeRules: vector.activeRules,
       mistakeCategoryCounts: vector.mistakeCategoryCounts as Partial<Record<MistakeCategory, number>>,

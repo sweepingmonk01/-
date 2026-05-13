@@ -19,6 +19,8 @@ export class StateUpdateEngine {
     return createDefaultCognitiveState();
   }
 
+  // heuristic: state-update.interaction-delta (v0)
+  // 见 server/src/modules/mobius/domain/heuristic-formulas.ts；N=200 cycles 后由回归替换。
   transitionInteractionState(previous: CognitiveState, outcome: InteractionOutcome): CognitiveState {
     const evidence = outcome === 'success'
       ? { positive: 1.8, negative: 0.35 }
@@ -41,6 +43,8 @@ export class StateUpdateEngine {
     };
   }
 
+  // heuristic: state-update.foundation-delta (v0)
+  // 见 server/src/modules/mobius/domain/heuristic-formulas.ts；N=100 cycles 后单独回归。
   transitionFoundationExplorationState(previous: CognitiveState, outcome: InteractionOutcome): CognitiveState {
     const evidence = outcome === 'success'
       ? { positive: 1.25, negative: 0.45 }
@@ -119,6 +123,8 @@ export class StateUpdateEngine {
     };
   }
 
+  // heuristic: state-update.mastery-evidence (v0)
+  // 见 server/src/modules/mobius/domain/heuristic-formulas.ts；遗忘衰减待引入。
   private applyMasteryEvidence(target: StudentStateVector['mastery'], snapshot: StudentStateSnapshot) {
     const key = snapshot.profile.knowledgeActionId ?? snapshot.profile.rule;
     if (!key) return;
@@ -157,6 +163,8 @@ export class StateUpdateEngine {
     };
   }
 
+  // heuristic: state-update.error-belief (v0)
+  // 见 server/src/modules/mobius/domain/heuristic-formulas.ts；时间衰减待引入。
   private applyErrorBelief(target: StudentStateVector['errorBeliefs'], snapshot: StudentStateSnapshot) {
     const painPoint = snapshot.profile.painPoint?.trim();
     if (!painPoint) return;

@@ -11,6 +11,7 @@ import type {
 import { DeepSeekCoachService } from './deepseek-coach-service.js';
 import { SQLiteKnowledgeGraphRepository } from '../infrastructure/sqlite-knowledge-graph-repository.js';
 import { SQLiteAgentJobRepository } from '../infrastructure/sqlite-agent-job-repository.js';
+import { filterGraphEntities } from './graph-entity-filter.js';
 
 interface GraphWeaverServiceDeps {
   coachService: DeepSeekCoachService | null;
@@ -147,13 +148,15 @@ export class GraphWeaverService {
       }
     }
 
-    return rawText
+    const rawSegments = rawText
       .split(/[，。；、,\s/()（）]+/)
       .map((item) => item.trim())
       .filter((item) => item.length >= 2)
       .map((item) => item.replace(/[.。,:：；;!?！？]+$/g, ''))
-      .filter(Boolean)
-      .slice(0, 6);
+      .filter(Boolean);
+    // 在 LLM 不可用的 heuristic fallback 路径下，把 10000 / m² / is / are
+    // 这类低语义噪声片段过滤掉，避免它们污染图谱热点 top N。
+    return filterGraphEntities(rawSegments).slice(0, 6);
   }
 
   private buildNeighborRecommendations(

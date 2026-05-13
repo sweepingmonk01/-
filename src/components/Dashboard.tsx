@@ -25,6 +25,12 @@ import WindPage from './layout/WindPage';
 import CloudGlassPanel from './ui/CloudGlassPanel';
 import GameButton from './ui/GameButton';
 import MissionBadge from './ui/MissionBadge';
+import MechanismLayerBadge from '../features/dashboard/MechanismLayerBadge';
+import KernelDeltaToast from '../features/dashboard/KernelDeltaToast';
+import GrowthLayerPanel from '../features/dashboard/GrowthLayerPanel';
+import OpsLayerCalendar from '../features/dashboard/OpsLayerCalendar';
+import KnowledgeGraphHotspotsPanel from '../features/dashboard/KnowledgeGraphHotspotsPanel';
+import JourneyMapPanel from '../features/dashboard/JourneyMapPanel';
 
 interface DashboardProps {
   data: DashboardViewState;
@@ -33,6 +39,10 @@ interface DashboardProps {
   onReturnHome: () => void;
   onTriggerUpload: () => void;
   onTriggerDehydrate: () => void;
+  knowledgeGraphSnapshot?: {
+    nodes: Array<{ key: string; label: string; weight: number }>;
+    edges: Array<{ source: string; target: string; weight: number }>;
+  } | null;
 }
 
 const shellCard = 'rounded-[22px]';
@@ -44,6 +54,7 @@ export default function Dashboard({
   onReturnHome,
   onTriggerUpload,
   onTriggerDehydrate,
+  knowledgeGraphSnapshot,
 }: DashboardProps) {
   if (loading) {
     return (
@@ -114,6 +125,8 @@ export default function Dashboard({
       <div className="relative flex-1 min-h-0 overflow-hidden px-3 pb-[5.6rem] pt-3">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-52 bg-[radial-gradient(circle_at_14%_16%,rgba(61,123,255,0.24),transparent_34%),radial-gradient(circle_at_88%_20%,rgba(255,138,61,0.18),transparent_30%),radial-gradient(circle_at_56%_72%,rgba(255,95,162,0.1),transparent_30%)]" />
 
+        <KernelDeltaToast snapshot={data.lastInteractionDiff} />
+
         <div className="relative mx-auto flex h-full w-full max-w-lg min-h-0 flex-col gap-2">
           <CloudGlassPanel className={`${shellCard} relative overflow-hidden px-3 py-2`}>
             <div className="absolute inset-x-6 top-0 h-px bg-[linear-gradient(90deg,transparent,rgba(61,123,255,0.35),transparent)]" />
@@ -137,6 +150,11 @@ export default function Dashboard({
             </div>
           </CloudGlassPanel>
 
+          <JourneyMapPanel
+            estimatedScore={data.estimatedScore || 0}
+            targetScore={data.targetScore || 115}
+          />
+
           <div className="grid min-h-0 flex-1 grid-cols-6 grid-rows-2 gap-2">
             <motion.section
               initial={{ opacity: 0, y: 16, rotate: -2.4 }}
@@ -145,9 +163,12 @@ export default function Dashboard({
               className="parchment-panel vl-surface relative col-span-4 row-span-2 flex min-h-0 flex-col overflow-hidden rounded-[22px] px-3 py-2.5"
             >
               <div className="absolute -right-8 top-2 h-20 w-20 rounded-full bg-[rgba(61,123,255,0.14)] blur-2xl" />
-              <MissionBadge tone="main" icon={<Sparkles size={10} />} className="w-fit text-[9px] uppercase tracking-[0.14em]">
-                今日航线
-              </MissionBadge>
+              <div className="flex items-center gap-1.5">
+                <MissionBadge tone="main" icon={<Sparkles size={10} />} className="w-fit text-[9px] uppercase tracking-[0.14em]">
+                  今日航线
+                </MissionBadge>
+                <MechanismLayerBadge layer="goal" />
+              </div>
 
               <h1 className="mt-1.5 text-[22px] font-display font-bold leading-[0.98] text-[#1a1a2e]">
                 主线任务卷轴
@@ -198,11 +219,14 @@ export default function Dashboard({
               transition={{ duration: 0.36, delay: 0.03 }}
               className="crystal-panel vl-surface col-span-2 row-span-1 flex min-h-0 flex-col overflow-hidden rounded-[22px] px-2.5 py-2 text-white"
             >
-              <div className="mb-1 flex items-start justify-between gap-1.5">
-                <p className="text-[9px] font-black uppercase tracking-[0.14em] text-cyan-200/70">御风状态盘</p>
-                <div className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${isStable ? 'border border-cyan-200/24 bg-cyan-300/14 text-cyan-100' : 'border border-red-300/24 bg-red-400/18 text-red-100'}`}>
-                  {data.cognitiveProjection.bottleneckLabel}
+              <div className="mb-1 flex flex-col gap-1">
+                <div className="flex items-start justify-between gap-1.5">
+                  <p className="text-[9px] font-black uppercase tracking-[0.14em] text-cyan-200/70">御风状态盘</p>
+                  <div className={`rounded-full px-1.5 py-0.5 text-[9px] font-bold ${isStable ? 'border border-cyan-200/24 bg-cyan-300/14 text-cyan-100' : 'border border-red-300/24 bg-red-400/18 text-red-100'}`}>
+                    {data.cognitiveProjection.bottleneckLabel}
+                  </div>
                 </div>
+                <MechanismLayerBadge layer="rule" />
               </div>
               <div className="rounded-xl border border-white/10 bg-white/6 px-1.5 py-1">
                 <ResponsiveContainer width="100%" height={86}>
@@ -213,6 +237,21 @@ export default function Dashboard({
                     <Radar name="State" dataKey="A" stroke="#7dd3fc" fill="#7dd3fc" fillOpacity={0.32} />
                   </RadarChart>
                 </ResponsiveContainer>
+                <div className="mt-1 grid grid-cols-3 gap-1 text-center">
+                  {data.cognitiveProjection.radar.map((axis) => (
+                    <div
+                      key={axis.key}
+                      className={`rounded-md border border-white/12 px-1 py-0.5 ${
+                        axis.key === data.cognitiveProjection.bottleneck
+                          ? 'bg-red-400/20 text-red-50'
+                          : 'bg-white/8 text-cyan-50'
+                      }`}
+                    >
+                      <p className="text-[8px] font-bold uppercase tracking-[0.08em] text-white/60">{axis.subject}</p>
+                      <p className="text-[13px] font-black leading-none">{axis.value}</p>
+                    </div>
+                  ))}
+                </div>
               </div>
             </motion.section>
 
@@ -222,14 +261,17 @@ export default function Dashboard({
               transition={{ duration: 0.36, delay: 0.06 }}
               className="parchment-panel vl-surface col-span-2 row-span-1 flex min-h-0 flex-col rounded-[22px] px-2.5 py-2"
             >
-              <div className="flex items-center justify-between gap-1.5">
-                <div className="flex items-center gap-1 text-[var(--color-secondary)]">
-                  <ShieldAlert size={13} />
-                  <p className="text-[9px] font-black uppercase tracking-[0.12em] text-gray-400">偏航风险</p>
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-1.5">
+                  <div className="flex items-center gap-1 text-[var(--color-secondary)]">
+                    <ShieldAlert size={13} />
+                    <p className="text-[9px] font-black uppercase tracking-[0.12em] text-gray-400">偏航风险</p>
+                  </div>
+                  <div className={`rounded-full px-1.5 py-0.5 text-[9px] font-black ${needsProtection ? 'bg-red-50 text-red-500' : isStable ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
+                    {riskStatusLabel}
+                  </div>
                 </div>
-                <div className={`rounded-full px-1.5 py-0.5 text-[9px] font-black ${needsProtection ? 'bg-red-50 text-red-500' : isStable ? 'bg-emerald-50 text-emerald-600' : 'bg-amber-50 text-amber-600'}`}>
-                  {riskStatusLabel}
-                </div>
+                <MechanismLayerBadge layer="growth" subtitle="长回路" />
               </div>
               <div className="mt-1 flex items-center justify-between gap-1">
                 <p className="text-[24px] font-black leading-none text-[#1a1a2e]">{data.activeIssuesCount || 0}</p>
@@ -238,9 +280,80 @@ export default function Dashboard({
               <div className="mt-1.5 rounded-xl bg-[linear-gradient(180deg,#fff4ea_0%,#f7f9ff_100%)] px-2 py-1.5">
                 <p className="text-[9px] font-black uppercase tracking-[0.12em] text-gray-400">Core Status</p>
                 <p className="mt-0.5 text-[10px] font-bold leading-4 text-[#1a1a2e]">{priorityTargets[0]}</p>
+                <p className="mt-1 text-[10px] font-medium leading-4 text-[var(--color-primary)]">
+                  {data.cognitiveProjection.bottleneckAdvice}
+                </p>
               </div>
             </motion.section>
           </div>
+
+          {data.lastInteractionDiff ? (
+            <motion.section
+              initial={{ opacity: 0, y: 10 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.32, delay: 0.04 }}
+              className="cloud-glass vl-surface relative rounded-[20px] px-3 py-2"
+            >
+              <div className="flex flex-col gap-1">
+                <div className="flex items-center justify-between gap-2">
+                  <p className="text-[10px] font-black uppercase tracking-[0.16em] text-gray-400">上次干预 · 状态变化</p>
+                  <div
+                    className={`rounded-full px-2 py-0.5 text-[10px] font-black ${
+                      data.lastInteractionDiff.outcome === 'success'
+                        ? 'bg-emerald-50 text-emerald-600'
+                        : 'bg-rose-50 text-rose-600'
+                    }`}
+                  >
+                    {data.lastInteractionDiff.outcome === 'success' ? '成功' : '失败'}
+                  </div>
+                </div>
+                <MechanismLayerBadge layer="feedback" />
+              </div>
+              <div className="mt-1.5 grid grid-cols-3 gap-2">
+                {(
+                  [
+                    { key: 'time', label: '时间' },
+                    { key: 'signalNoiseRatio', label: '信噪比' },
+                    { key: 'emotion', label: '情绪' },
+                  ] as const
+                ).map(({ key, label }) => {
+                  const before = data.lastInteractionDiff!.before[key];
+                  const after = data.lastInteractionDiff!.after[key];
+                  const delta = data.lastInteractionDiff!.delta[key];
+                  const tone =
+                    delta > 0
+                      ? 'text-emerald-600'
+                      : delta < 0
+                      ? 'text-rose-600'
+                      : 'text-gray-500';
+                  const sign = delta > 0 ? '+' : '';
+                  return (
+                    <div key={key} className="rounded-xl border border-[#7aa7ff]/14 bg-white/85 px-2 py-1.5 text-center">
+                      <p className="text-[9px] font-bold uppercase tracking-[0.14em] text-gray-400">{label}</p>
+                      <p className="mt-0.5 text-[12px] font-black leading-tight text-[#1a1a2e]">
+                        {before}
+                        <span className="mx-0.5 text-gray-300">→</span>
+                        {after}
+                      </p>
+                      <p className={`text-[11px] font-black leading-tight ${tone}`}>
+                        {sign}
+                        {delta}
+                      </p>
+                    </div>
+                  );
+                })}
+              </div>
+            </motion.section>
+          ) : null}
+
+          <GrowthLayerPanel
+            nodes={data.topMasteryNodes}
+            graphSnapshot={knowledgeGraphSnapshot ?? undefined}
+          />
+
+          <KnowledgeGraphHotspotsPanel snapshot={knowledgeGraphSnapshot ?? undefined} />
+
+          <OpsLayerCalendar rhythm={data.weeklyRhythm} />
 
           <div className="grid grid-cols-2 gap-2">
             <motion.button
@@ -281,7 +394,7 @@ export default function Dashboard({
             className="cloud-glass vl-surface relative rounded-[22px] px-2.5 py-2"
           >
             <div className="flex items-center justify-between gap-2">
-              <p className="text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">航线补给</p>
+              <p className="text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">航线补给 · 快捷入口</p>
               <div className="rounded-full bg-[linear-gradient(90deg,#edf4ff_0%,#fff2f7_100%)] px-2.5 py-0.5 text-[9px] font-black text-[var(--color-primary)]">
                 {coreModuleTag}
               </div>

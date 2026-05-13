@@ -579,7 +579,7 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
       assert.ok(cyclesPayload.evaluation.completedCycles >= 1);
       assert.ok(cyclesPayload.evaluation.failureCount >= 1);
       assert.equal(cyclesPayload.evaluation.successRate, 0);
-      assert.equal(cyclesPayload.evaluation.averageEffectScore, 0);
+      assert.ok(cyclesPayload.evaluation.averageEffectScore <= 0);
       assert.ok(cyclesPayload.evaluation.modelEvaluation.completedPredictions >= 1);
       assert.ok(cyclesPayload.evaluation.modelEvaluation.averageBrierScore >= 0);
       assert.ok(cyclesPayload.evaluation.painPointTrends.some((item) => item.painPoint === '几何辅助线'));
@@ -601,16 +601,29 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
         flow: {
           stateBefore?: unknown;
           hypothesis?: unknown;
-          selectedAction?: { selectedStrategy?: string };
+          selectedAction?: {
+            selectedStrategy?: string;
+            strategyPolicyId?: string;
+            strategyAlternatives?: Array<{
+              policyId: string;
+              selectedStrategy: string;
+            }>;
+          };
           result: { outcome?: string; effectScore?: number; status: string };
           stateAfter?: unknown;
           evidence: Array<{ source: string; modality: string; outcome?: string; targetNodeKey?: string }>;
-          events: Array<{ eventType: string }>;
+          events: Array<{
+            eventType: string;
+            eventPayload?: Record<string, unknown>;
+          }>;
         };
       };
       assert.equal(cycleReport.cycle.id, session.cycleId);
       assert.equal(cycleReport.flow.result.outcome, 'failure');
-      assert.equal(cycleReport.flow.result.effectScore, 0);
+      // 自 v0 effect-score-engine 起，failure 至少贡献 -W_OUTCOME = -0.5；
+      // 这里只断言为非 undefined 的非正数，避免与 kernel/baseline 分量耦合。
+      assert.ok(typeof cycleReport.flow.result.effectScore === 'number');
+      assert.ok((cycleReport.flow.result.effectScore ?? 0) <= 0);
       assert.ok(cycleReport.flow.stateBefore);
       assert.ok(cycleReport.flow.stateAfter);
       assert.ok(cycleReport.flow.hypothesis);
@@ -625,6 +638,29 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
         cycleReport.flow.events.map((event) => event.eventType),
         events.map((event) => event.eventType),
       );
+
+      // 锁定 #1 effectScore breakdown 契约：effect.evaluated 事件必须带 breakdown。
+      const effectEvent = cycleReport.flow.events.find((event) => event.eventType === 'effect.evaluated');
+      assert.ok(effectEvent, 'effect.evaluated event must be recorded');
+      const breakdown = effectEvent!.eventPayload?.effectScoreBreakdown as {
+        total?: number;
+        outcomeComponent?: number;
+        kernelComponent?: number;
+        baselineComponent?: number;
+      } | undefined;
+      assert.ok(breakdown, 'effectScoreBreakdown must be present in event payload');
+      assert.equal(typeof breakdown!.total, 'number');
+      assert.equal(typeof breakdown!.outcomeComponent, 'number');
+      assert.equal(typeof breakdown!.kernelComponent, 'number');
+      assert.equal(typeof breakdown!.baselineComponent, 'number');
+      // failure 必然贡献负向 outcomeComponent。
+      assert.ok((breakdown!.outcomeComponent ?? 0) < 0);
+
+      // 锁定 #2 影子策略契约：strategyPolicyId 与 strategyAlternatives 必须落入 selectedAction。
+      assert.equal(cycleReport.flow.selectedAction?.strategyPolicyId, 'scored-default-v0');
+      const shadowAlternatives = cycleReport.flow.selectedAction?.strategyAlternatives ?? [];
+      assert.ok(shadowAlternatives.length >= 1, 'at least one shadow alternative must be recorded');
+      assert.ok(shadowAlternatives.some((alt) => alt.policyId === 'scored-balanced-v0'));
 
       const forbiddenCycleReport = await fetch(
         `${baseUrl}/api/mobius/students/student-b/learning-cycles/${session.cycleId}/report`,

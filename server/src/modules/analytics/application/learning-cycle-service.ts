@@ -10,6 +10,13 @@ import type {
   UpdateHypothesisSummaryInput,
 } from '../domain/types.js';
 import { SQLiteLearningCycleRepository } from '../infrastructure/sqlite-learning-cycle-repository.js';
+import { computeEffectScore, type EffectScoreBreakdown } from './effect-score-engine.js';
+
+const BASELINE_HISTORY_LIMIT = 100;
+
+const matchesPainPoint = (cycle: LearningCycleRecord, painPoint: string) => (
+  cycle.painPoint.trim() === painPoint.trim()
+);
 
 interface RecordDiagnosticThreadInput {
   cycleId?: string;
@@ -356,17 +363,25 @@ export class LearningCycleService {
   }
 
   async recordFoundationExploration(input: RecordFoundationExplorationInput): Promise<LearningCycleRecord> {
+    const painPoint = `基础科学探索：${input.nodeLabel}`;
+    const breakdown = await this.computeEffectScoreForCycle({
+      studentId: input.studentId,
+      painPoint,
+      outcome: input.outcome,
+      stateBefore: input.stateBefore,
+      stateAfter: input.stateAfter,
+    });
     const cycle = await this.repository.create({
       studentId: input.studentId,
       source: 'foundation-science-exploration',
       status: 'validated',
-      painPoint: `基础科学探索：${input.nodeLabel}`,
+      painPoint,
       rule: input.coreQuestion,
       knowledgeActionId: `foundation:${input.nodeKey}:${input.taskId}`,
       stateBefore: input.stateBefore,
       stateAfter: input.stateAfter,
       outcome: input.outcome,
-      effectScore: input.outcome === 'success' ? 1 : 0,
+      effectScore: breakdown.total,
       selectedAction: {
         knowledgeAction: {
           id: `foundation:${input.nodeKey}:${input.taskId}`,
@@ -432,6 +447,7 @@ export class LearningCycleService {
       eventPayload: {
         outcome: input.outcome,
         effectScore: cycle.effectScore,
+        effectScoreBreakdown: breakdown,
       },
     });
     await this.repository.appendEvidence({
@@ -463,15 +479,43 @@ export class LearningCycleService {
     return cycle;
   }
 
+  private async computeEffectScoreForCycle(input: {
+    cycleId?: string;
+    studentId: string;
+    painPoint: string;
+    outcome: 'success' | 'failure';
+    stateBefore?: CognitiveState | null;
+    stateAfter?: CognitiveState | null;
+  }): Promise<EffectScoreBreakdown> {
+    const recent = await this.repository.listByStudent(input.studentId, BASELINE_HISTORY_LIMIT);
+    const historicalCycles = recent.filter((cycle) => (
+      cycle.id !== input.cycleId && matchesPainPoint(cycle, input.painPoint)
+    ));
+
+    return computeEffectScore({
+      outcome: input.outcome,
+      stateBefore: input.stateBefore,
+      stateAfter: input.stateAfter,
+      historicalCycles,
+    });
+  }
+
   async recordInteractionResolution(input: RecordInteractionResolutionInput & { stateBefore?: CognitiveState }) {
     const cycle = await this.repository.getByMediaJobId(input.mediaJobId);
     if (!cycle) return null;
 
-    const effectScore = input.outcome === 'success' ? 1 : 0;
+    const breakdown = await this.computeEffectScoreForCycle({
+      cycleId: cycle.id,
+      studentId: cycle.studentId,
+      painPoint: cycle.painPoint,
+      outcome: input.outcome,
+      stateBefore: input.stateBefore ?? cycle.stateBefore,
+      stateAfter: input.stateAfter,
+    });
     const updated = await this.repository.update(cycle.id, {
       status: 'validated',
       outcome: input.outcome,
-      effectScore,
+      effectScore: breakdown.total,
       stateAfter: input.stateAfter,
     });
     if (!updated) return null;
@@ -504,7 +548,8 @@ export class LearningCycleService {
       eventType: 'effect.evaluated',
       eventPayload: {
         outcome: input.outcome,
-        effectScore,
+        effectScore: breakdown.total,
+        effectScoreBreakdown: breakdown,
       },
     });
     if (input.followupStrategyDecision) {
