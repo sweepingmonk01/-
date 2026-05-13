@@ -1,7 +1,11 @@
 import React, { useEffect, useState } from 'react';
+import { useLang, useT } from '../i18n/LanguageContext';
+import { Globe } from 'lucide-react';
 
 const Header: React.FC = () => {
   const [scrolled, setScrolled] = useState(false);
+  const { lang, toggleLang } = useLang();
+  const t = useT();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 40);
@@ -17,7 +21,7 @@ const Header: React.FC = () => {
           : 'bg-transparent'
       }`}
     >
-      <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-6">
+      <div className="mx-auto flex h-16 max-w-[1200px] items-center justify-between px-8">
         <a href="#" className="flex items-center gap-2.5">
           <div className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-[var(--aiu-sky-deep)] to-[var(--aiu-ocean)] text-sm font-black text-white shadow-[0_4px_12px_rgba(74,158,255,0.3)]">
             A
@@ -27,12 +31,11 @@ const Header: React.FC = () => {
           </span>
         </a>
 
-        <nav className="hidden items-center gap-8 md:flex">
+        <nav className="flex items-center gap-10">
           {[
-            ['#philosophy', '教育理念'],
-            ['#how', '如何运作'],
-            ['#for-whom', '谁适合'],
-            ['#open-source', '开源'],
+            ['#philosophy', t('nav.philosophy')],
+            ['#how', t('nav.how')],
+            ['#for-whom', t('nav.forWhom')],
           ].map(([href, label]) => (
             <a
               key={href}
@@ -44,12 +47,22 @@ const Header: React.FC = () => {
           ))}
         </nav>
 
-        <a
-          href="#waitlist"
-          className="rounded-full bg-[var(--aiu-ocean)] px-5 py-2 text-sm font-bold text-white shadow-[0_4px_14px_rgba(13,31,51,0.2)] transition-all hover:shadow-[0_6px_20px_rgba(13,31,51,0.3)] hover:brightness-110"
-        >
-          加入等候名单
-        </a>
+        <div className="flex items-center gap-4">
+          <button
+            onClick={toggleLang}
+            className="flex items-center gap-1.5 rounded-full border border-[var(--aiu-line)] px-3.5 py-1.5 text-xs font-bold text-[var(--aiu-ink-soft)] transition-all hover:border-[var(--aiu-sky-deep)] hover:text-[var(--aiu-ocean)]"
+          >
+            <Globe size={14} />
+            {lang === 'cn' ? 'EN' : '中文'}
+          </button>
+
+          <a
+            href="#waitlist"
+            className="rounded-full bg-[var(--aiu-ocean)] px-5 py-2 text-sm font-bold text-white shadow-[0_4px_14px_rgba(13,31,51,0.2)] transition-all hover:shadow-[0_6px_20px_rgba(13,31,51,0.3)] hover:brightness-110"
+          >
+            {t('nav.joinWaitlist')}
+          </a>
+        </div>
       </div>
     </header>
   );
