@@ -10,7 +10,12 @@ import type {
   UpdateHypothesisSummaryInput,
 } from '../domain/types.js';
 import { SQLiteLearningCycleRepository } from '../infrastructure/sqlite-learning-cycle-repository.js';
-import { computeEffectScore, type EffectScoreBreakdown } from './effect-score-engine.js';
+import {
+  computeEffectScore,
+  type EffectScoreBreakdown,
+  type ExecutionEvidence,
+  type FollowupEvidence,
+} from './effect-score-engine.js';
 import {
   computeStrategyValueReflow,
   type StrategyValueReflow,
@@ -18,10 +23,37 @@ import {
 
 const BASELINE_HISTORY_LIMIT = 100;
 const REFLOW_HISTORY_LIMIT = 100;
+// followup 留存回评的回看窗口:一条新完成的 cycle 会触发同知识点历史 cycle 的价值再评估。
+const FOLLOWUP_HISTORY_LIMIT = 100;
 
 const matchesPainPoint = (cycle: LearningCycleRecord, painPoint: string) => (
   cycle.painPoint.trim() === painPoint.trim()
 );
+
+const isCompleted = (cycle: LearningCycleRecord): cycle is LearningCycleRecord & { outcome: 'success' | 'failure' } => (
+  cycle.outcome === 'success' || cycle.outcome === 'failure'
+);
+
+const clampScore = (value: number) => (
+  Math.round(Math.max(-1, Math.min(1, value)) * 1000) / 1000
+);
+
+// 从"该 cycle 之后、同知识点已判定的后续作答"聚合真实 followup 留存证据。
+// 无后续作答时返回 undefined(retention 维度回落到 baseline 代理)。
+const computeFollowupEvidence = (
+  target: LearningCycleRecord,
+  sameKnowledgeCompleted: Array<LearningCycleRecord & { outcome: 'success' | 'failure' }>,
+): FollowupEvidence | undefined => {
+  const subsequent = sameKnowledgeCompleted.filter(
+    (cycle) => cycle.id !== target.id && cycle.createdAt > target.createdAt,
+  );
+  if (subsequent.length === 0) return undefined;
+  const successes = subsequent.filter((cycle) => cycle.outcome === 'success').length;
+  return {
+    sampleCount: subsequent.length,
+    subsequentSuccessRate: successes / subsequent.length,
+  };
+};
 
 interface RecordDiagnosticThreadInput {
   cycleId?: string;
@@ -388,6 +420,7 @@ export class LearningCycleService {
       outcome: input.outcome,
       effectScore: breakdown.total,
       effectScoreValueComponent: breakdown.valueComponent,
+      effectScoreExecutionComponent: breakdown.executionComponent,
       selectedAction: {
         knowledgeAction: {
           id: `foundation:${input.nodeKey}:${input.taskId}`,
@@ -482,6 +515,9 @@ export class LearningCycleService {
       },
     });
 
+    // 这条新完成的 cycle 是同知识点历史 cycle 的真实"后续作答表现"——回评它们的留存价值。
+    await this.reevaluateFollowupForPriorCycles(cycle.studentId, cycle.painPoint, cycle.id);
+
     return cycle;
   }
 
@@ -492,6 +528,7 @@ export class LearningCycleService {
     outcome: 'success' | 'failure';
     stateBefore?: CognitiveState | null;
     stateAfter?: CognitiveState | null;
+    executionEvidence?: ExecutionEvidence;
   }): Promise<EffectScoreBreakdown> {
     const recent = await this.repository.listByStudent(input.studentId, BASELINE_HISTORY_LIMIT);
     const historicalCycles = recent.filter((cycle) => (
@@ -503,6 +540,7 @@ export class LearningCycleService {
       stateBefore: input.stateBefore,
       stateAfter: input.stateAfter,
       historicalCycles,
+      executionEvidence: input.executionEvidence,
     });
   }
 
@@ -517,12 +555,15 @@ export class LearningCycleService {
       outcome: input.outcome,
       stateBefore: input.stateBefore ?? cycle.stateBefore,
       stateAfter: input.stateAfter,
+      // 真实执行证据在线接入:交互已 resolved,媒体分支是否生成。受硬上限约束。
+      executionEvidence: input.executionEvidence,
     });
     const updated = await this.repository.update(cycle.id, {
       status: 'validated',
       outcome: input.outcome,
       effectScore: breakdown.total,
       effectScoreValueComponent: breakdown.valueComponent,
+      effectScoreExecutionComponent: breakdown.executionComponent,
       stateAfter: input.stateAfter,
     });
     if (!updated) return null;
@@ -595,7 +636,71 @@ export class LearningCycleService {
       },
     });
 
+    // 这条新完成的 cycle 是同知识点历史 cycle 的真实"后续作答表现"——回评它们的留存价值。
+    await this.reevaluateFollowupForPriorCycles(updated.studentId, updated.painPoint, updated.id);
+
     return updated;
+  }
+
+  // T2 阶段一:真实 followup 留存回评。一条新完成的 cycle 到达后,把它作为同知识点历史
+  // cycle 的"后续真实作答表现",重算那些历史 cycle 的 effect_score_value——让 retention
+  // 维度从 baseline 代理切换到真实数据。total 用重算后的 value + 已持久化的 execution 分量
+  // 重建,execution 仍受硬上限约束(纯执行救不回负留存)。回写全程挂 cycleId。
+  private async reevaluateFollowupForPriorCycles(
+    studentId: string,
+    painPoint: string,
+    triggerCycleId: string,
+  ): Promise<void> {
+    const recent = await this.repository.listByStudent(studentId, FOLLOWUP_HISTORY_LIMIT);
+    const sameKnowledgeCompleted = recent
+      .filter((cycle) => matchesPainPoint(cycle, painPoint))
+      .filter(isCompleted);
+
+    for (const target of sameKnowledgeCompleted) {
+      // 触发 cycle 自身此刻还没有"后续"作答,不回评。
+      if (target.id === triggerCycleId) continue;
+
+      const followupEvidence = computeFollowupEvidence(target, sameKnowledgeCompleted);
+      if (!followupEvidence) continue;
+
+      const historicalCycles = sameKnowledgeCompleted.filter(
+        (cycle) => cycle.id !== target.id && cycle.createdAt < target.createdAt,
+      );
+      const breakdown = computeEffectScore({
+        outcome: target.outcome,
+        stateBefore: target.stateBefore,
+        stateAfter: target.stateAfter,
+        historicalCycles,
+        followupEvidence,
+      });
+
+      const storedExecution = target.effectScoreExecutionComponent ?? 0;
+      const newValue = breakdown.valueComponent;
+      const newTotal = clampScore(newValue + storedExecution);
+      const prevValue = target.effectScoreValueComponent;
+
+      // 价值分量无变化则不写(幂等,避免刷 updated_at 与事件)。
+      if (typeof prevValue === 'number' && Math.abs(prevValue - newValue) < 1e-6) continue;
+
+      await this.repository.update(target.id, {
+        effectScore: newTotal,
+        effectScoreValueComponent: newValue,
+      });
+      await this.repository.appendEvent({
+        cycleId: target.id,
+        eventType: 'effect.reevaluated',
+        eventPayload: {
+          reason: 'followup-retention',
+          triggerCycleId,
+          followupSampleCount: followupEvidence.sampleCount,
+          subsequentSuccessRate: followupEvidence.subsequentSuccessRate,
+          previousEffectScoreValue: prevValue ?? null,
+          effectScore: newTotal,
+          effectScoreValue: newValue,
+          effectScoreBreakdown: breakdown,
+        },
+      });
+    }
   }
 
   async recordDiagnosticThreadCreated(input: RecordDiagnosticThreadInput) {

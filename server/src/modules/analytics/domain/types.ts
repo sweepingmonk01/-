@@ -8,6 +8,7 @@ import type {
   StrategyDecision,
   StrategyKind,
 } from '../../mobius/domain/types.js';
+import type { ExecutionEvidence } from '../application/effect-score-engine.js';
 
 export type LearningCycleSource = 'mobius-session' | 'foundation-science-exploration';
 export type LearningCycleStatus = 'started' | 'validated' | 'diagnosed' | 'closed';
@@ -60,6 +61,9 @@ export interface LearningCycleRecord {
   // effect_score 的价值分量(只由 value-evidence 组成)。回流只读这个字段，
   // 缺省时回落到 effectScore(旧行)。见 effect-score-engine / strategy-value-reflow。
   effectScoreValueComponent?: number;
+  // effect_score 的执行分量(被 EXECUTION_EVIDENCE_CAP 夹住的代理确认)。
+  // 单独持久化,便于 followup 留存回评时重建 total = clamp(value + execution)。
+  effectScoreExecutionComponent?: number;
   createdAt: string;
   updatedAt: string;
   closedAt?: string;
@@ -84,6 +88,7 @@ export type LearningCycleEventType =
   | 'interaction.resolved'
   | 'state.snapshot.after'
   | 'effect.evaluated'
+  | 'effect.reevaluated'
   | 'diagnostic.thread.created'
   | 'hypothesis.summary.updated'
   | 'cycle.closed';
@@ -123,6 +128,9 @@ export interface RecordInteractionResolutionInput {
     rationale: string[];
   };
   branchJobId?: string;
+  // 真实执行证据:交互 resolved / 媒体是否生成。受 EXECUTION_EVIDENCE_CAP 约束,
+  // 只贡献带硬上限的微弱确认,永远不能单独把负价值顶成正分(防 Goodhart)。
+  executionEvidence?: ExecutionEvidence;
 }
 
 export interface UpdateHypothesisSummaryInput {

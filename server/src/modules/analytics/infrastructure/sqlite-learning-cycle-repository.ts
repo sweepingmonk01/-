@@ -30,6 +30,7 @@ interface LearningCycleRow {
   outcome: LearningCycleRecord['outcome'] | null;
   effect_score: number | null;
   effect_score_value: number | null;
+  effect_score_execution: number | null;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
@@ -85,6 +86,7 @@ export class SQLiteLearningCycleRepository {
         outcome TEXT,
         effect_score REAL,
         effect_score_value REAL,
+        effect_score_execution REAL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         closed_at TEXT
@@ -128,6 +130,7 @@ export class SQLiteLearningCycleRepository {
     `);
 
     this.ensureColumn('learning_cycles', 'effect_score_value', 'REAL');
+    this.ensureColumn('learning_cycles', 'effect_score_execution', 'REAL');
   }
 
   // 幂等迁移:老 DB 的 learning_cycles 没有 effect_score_value 列时补上。
@@ -151,8 +154,8 @@ export class SQLiteLearningCycleRepository {
         id, student_id, source, status, session_id, media_job_id,
         pain_point, rule_text, knowledge_action_id, state_before_json, state_after_json,
         hypothesis_summary_json, selected_action_json, outcome, effect_score, effect_score_value,
-        created_at, updated_at, closed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        effect_score_execution, created_at, updated_at, closed_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.id,
       record.studentId,
@@ -170,6 +173,7 @@ export class SQLiteLearningCycleRepository {
       record.outcome ?? null,
       record.effectScore ?? null,
       record.effectScoreValueComponent ?? null,
+      record.effectScoreExecutionComponent ?? null,
       record.createdAt,
       record.updatedAt,
       record.closedAt ?? null,
@@ -196,7 +200,7 @@ export class SQLiteLearningCycleRepository {
       SET status = ?, session_id = ?, media_job_id = ?, pain_point = ?, rule_text = ?,
           knowledge_action_id = ?, state_before_json = ?, state_after_json = ?,
           hypothesis_summary_json = ?, selected_action_json = ?, outcome = ?, effect_score = ?,
-          effect_score_value = ?, updated_at = ?, closed_at = ?
+          effect_score_value = ?, effect_score_execution = ?, updated_at = ?, closed_at = ?
       WHERE id = ?
     `).run(
       next.status,
@@ -212,6 +216,7 @@ export class SQLiteLearningCycleRepository {
       next.outcome ?? null,
       next.effectScore ?? null,
       next.effectScoreValueComponent ?? null,
+      next.effectScoreExecutionComponent ?? null,
       next.updatedAt,
       next.closedAt ?? null,
       id,
@@ -371,6 +376,7 @@ export class SQLiteLearningCycleRepository {
       outcome: row.outcome ?? undefined,
       effectScore: row.effect_score ?? undefined,
       effectScoreValueComponent: row.effect_score_value ?? undefined,
+      effectScoreExecutionComponent: row.effect_score_execution ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       closedAt: row.closed_at ?? undefined,

@@ -314,6 +314,11 @@ export class MobiusOrchestrator {
       actionType: input.actionType,
       followupStrategyDecision: strategyDecision,
       branchJobId: branchJob.id,
+      // 真实执行证据在线接入:交互已 resolved,媒体分支已生成。受 T2 硬上限约束。
+      executionEvidence: {
+        interactionResolved: true,
+        mediaGenerated: Boolean(branchJob?.id),
+      },
     });
 
     return this.buildInteractionResolution(job, input.outcome, strategyDecision, branchJob, undefined, cycle?.id);
@@ -350,6 +355,11 @@ export class MobiusOrchestrator {
       followupStrategyDecision: strategyDecision,
       adjudication,
       branchJobId: branchJob.id,
+      // 真实执行证据在线接入:交互已 resolved(经裁决),媒体分支已生成。受 T2 硬上限约束。
+      executionEvidence: {
+        interactionResolved: true,
+        mediaGenerated: Boolean(branchJob?.id),
+      },
     });
 
     return this.buildInteractionResolution(job, adjudication.outcome, strategyDecision, branchJob, adjudication.rationale, cycle?.id);
