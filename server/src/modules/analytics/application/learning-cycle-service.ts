@@ -20,6 +20,14 @@ import {
   computeStrategyValueReflow,
   type StrategyValueReflow,
 } from './strategy-value-reflow.js';
+import {
+  compareShadowConfigs,
+  type ShadowConfigComparisonReport,
+} from './shadow-config-promotion-gate.js';
+import {
+  DEFAULT_SCORED_SCHEDULER_CONFIG,
+  BALANCED_SCORED_SCHEDULER_CONFIG,
+} from '../../mobius/infrastructure/scored-strategy-scheduler.js';
 
 const BASELINE_HISTORY_LIMIT = 100;
 const REFLOW_HISTORY_LIMIT = 100;
@@ -776,6 +784,40 @@ export class LearningCycleService {
   async getStrategyValueReflow(studentId: string): Promise<StrategyValueReflow> {
     const cycles = await this.repository.listByStudent(studentId, REFLOW_HISTORY_LIMIT);
     return computeStrategyValueReflow(cycles);
+  }
+
+  // T3 影子 A/B 配置晋升门:基于阶段一的真实 value-evidence,对 DEFAULT(primary)vs
+  // BALANCED(shadow)出一份对比报告 + 显式"建议晋升/维持"决策记录。晋升判据只用真实价值
+  // 信号,不用执行代理;门只建议,配置真实切换保留人工确认(autoFlipAllowed 恒 false)。
+  // 决策记录作为学生级 evidence 事件持久化(结构化,可审计),不只是自然语言。
+  async getShadowConfigPromotionReport(
+    studentId: string,
+    options?: { primaryPolicyId?: string; challengerPolicyId?: string; record?: boolean },
+  ): Promise<ShadowConfigComparisonReport> {
+    const cycles = await this.repository.listByStudent(studentId, REFLOW_HISTORY_LIMIT);
+    const report = compareShadowConfigs({
+      cycles,
+      primaryPolicyId: options?.primaryPolicyId ?? DEFAULT_SCORED_SCHEDULER_CONFIG.policyId,
+      challengerPolicyId: options?.challengerPolicyId ?? BALANCED_SCORED_SCHEDULER_CONFIG.policyId,
+    });
+
+    // 默认把这次显式裁决登记为一条学生级 evidence(结构化决策记录,挂 studentId)。
+    if (options?.record !== false) {
+      await this.repository.appendEvidence({
+        studentId,
+        modality: 'interaction',
+        source: 'shadow.config.promotion.decision',
+        confidence: report.challengerWinRate ?? 0.5,
+        observedAt: report.generatedAt,
+        modelVersion: 'shadow-config-promotion-gate-v1',
+        privacyLevel: 'server',
+        payload: {
+          shadowConfigPromotion: toJsonObject(report),
+        },
+      });
+    }
+
+    return report;
   }
 
   async listStudentCycleReports(studentId: string, limit?: number) {
