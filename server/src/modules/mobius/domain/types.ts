@@ -106,6 +106,9 @@ export interface StrategySchedulerInput {
   cognitiveState: CognitiveState;
   stateVector?: StudentStateVector | null;
   graphDecisionContext?: KnowledgeGraphDecisionContext;
+  // T2 价值信号回流:per-strategy 的分数偏置，来自累计的 value-evidence effect_score。
+  // 由 analytics/strategy-value-reflow 计算并夹在 [-CAP, CAP]，scheduler 再夹一次防越界。
+  strategyValuePriors?: Partial<Record<StrategyKind, number>>;
 }
 
 export type InteractionOutcome = 'success' | 'failure';

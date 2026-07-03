@@ -11,8 +11,13 @@ import type {
 } from '../domain/types.js';
 import { SQLiteLearningCycleRepository } from '../infrastructure/sqlite-learning-cycle-repository.js';
 import { computeEffectScore, type EffectScoreBreakdown } from './effect-score-engine.js';
+import {
+  computeStrategyValueReflow,
+  type StrategyValueReflow,
+} from './strategy-value-reflow.js';
 
 const BASELINE_HISTORY_LIMIT = 100;
+const REFLOW_HISTORY_LIMIT = 100;
 
 const matchesPainPoint = (cycle: LearningCycleRecord, painPoint: string) => (
   cycle.painPoint.trim() === painPoint.trim()
@@ -382,6 +387,7 @@ export class LearningCycleService {
       stateAfter: input.stateAfter,
       outcome: input.outcome,
       effectScore: breakdown.total,
+      effectScoreValueComponent: breakdown.valueComponent,
       selectedAction: {
         knowledgeAction: {
           id: `foundation:${input.nodeKey}:${input.taskId}`,
@@ -516,6 +522,7 @@ export class LearningCycleService {
       status: 'validated',
       outcome: input.outcome,
       effectScore: breakdown.total,
+      effectScoreValueComponent: breakdown.valueComponent,
       stateAfter: input.stateAfter,
     });
     if (!updated) return null;
@@ -657,6 +664,13 @@ export class LearningCycleService {
 
   async getCycleByMediaJobId(mediaJobId: string) {
     return this.repository.getByMediaJobId(mediaJobId);
+  }
+
+  // T2 价值信号回流:把该学生累计的价值证据 effect_score 按策略聚合成回流偏置，
+  // 供 ScoredStrategyScheduler 抬高/压低历史真实增益不同的策略。只吃 value 分量。
+  async getStrategyValueReflow(studentId: string): Promise<StrategyValueReflow> {
+    const cycles = await this.repository.listByStudent(studentId, REFLOW_HISTORY_LIMIT);
+    return computeStrategyValueReflow(cycles);
   }
 
   async listStudentCycleReports(studentId: string, limit?: number) {

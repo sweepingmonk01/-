@@ -76,6 +76,10 @@ export const BALANCED_SCORED_SCHEDULER_CONFIG: ScoredSchedulerConfig = {
   },
 };
 
+// 防御性上限:即使上游回流偏置越界,scheduler 也不允许单一价值信号主导决策曲面。
+// 与 analytics/strategy-value-reflow 的 STRATEGY_VALUE_REFLOW_CAP 同尺度,此处再夹一次。
+const VALUE_REFLOW_BIAS_CAP = 8;
+
 export class ScoredStrategyScheduler implements StrategyScheduler {
   private readonly config: ScoredSchedulerConfig;
 
@@ -106,6 +110,7 @@ export class ScoredStrategyScheduler implements StrategyScheduler {
     const scoreBreakdown = buildStrategyScoreBreakdown(strategy, input);
     const strategyBias = this.resolveStrategyBias(strategy, scoreBreakdown);
     const expectedUtility = this.estimateExpectedUtility(strategy, input, scoreBreakdown);
+    const valueReflowBias = this.resolveValueReflowBias(strategy, input);
     const score = Math.max(
       0,
       Math.round(
@@ -113,6 +118,7 @@ export class ScoredStrategyScheduler implements StrategyScheduler {
           + Object.values(scoreBreakdown).reduce((total, feature) => total + feature.contribution, 0)
           + expectedUtility.utilityBonus
           + strategyBias
+          + valueReflowBias
       ),
     );
 
@@ -122,8 +128,15 @@ export class ScoredStrategyScheduler implements StrategyScheduler {
       score,
       scoreBreakdown,
       expectedUtility,
-      rationale: this.describeCandidate(strategy, scoreBreakdown, expectedUtility),
+      rationale: this.describeCandidate(strategy, scoreBreakdown, expectedUtility, valueReflowBias),
     };
+  }
+
+  // T2 价值信号回流:读入上游按 value-evidence 聚合的 per-strategy 偏置,防御性夹一次。
+  private resolveValueReflowBias(strategy: StrategyKind, input: StrategySchedulerInput): number {
+    const raw = input.strategyValuePriors?.[strategy] ?? 0;
+    if (!Number.isFinite(raw)) return 0;
+    return Math.max(-VALUE_REFLOW_BIAS_CAP, Math.min(VALUE_REFLOW_BIAS_CAP, raw));
   }
 
   private estimateExpectedUtility(
@@ -199,10 +212,17 @@ export class ScoredStrategyScheduler implements StrategyScheduler {
     strategy: StrategyKind,
     breakdown: StrategyCandidate['scoreBreakdown'],
     expectedUtility: { successProbability: number; utilityBonus: number },
+    valueReflowBias: number = 0,
   ) {
-    const highlights = summarizeStrategyBreakdown(breakdown)
-      .map((feature) => `${feature.label}${feature.contribution >= 0 ? '+' : ''}${feature.contribution}`)
-      .join('，');
+    const reflowNote = Math.round(valueReflowBias) !== 0
+      ? `价值回流${valueReflowBias >= 0 ? '+' : ''}${Math.round(valueReflowBias)}。`
+      : '';
+    const highlights = [
+      summarizeStrategyBreakdown(breakdown)
+        .map((feature) => `${feature.label}${feature.contribution >= 0 ? '+' : ''}${feature.contribution}`)
+        .join('，'),
+      reflowNote,
+    ].filter(Boolean).join(' ');
 
     if (strategy === 'probe') {
       return `先探测断点。后验成功率约${expectedUtility.successProbability}/100，效用校准${expectedUtility.utilityBonus >= 0 ? '+' : ''}${expectedUtility.utilityBonus}。${highlights || '当前需要先缩小认知断裂。'}`;

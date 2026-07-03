@@ -57,6 +57,9 @@ export interface LearningCycleRecord {
   };
   outcome?: InteractionOutcome;
   effectScore?: number;
+  // effect_score 的价值分量(只由 value-evidence 组成)。回流只读这个字段，
+  // 缺省时回落到 effectScore(旧行)。见 effect-score-engine / strategy-value-reflow。
+  effectScoreValueComponent?: number;
   createdAt: string;
   updatedAt: string;
   closedAt?: string;

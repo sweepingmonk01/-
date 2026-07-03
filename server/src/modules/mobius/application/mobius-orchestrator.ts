@@ -47,11 +47,13 @@ export class MobiusOrchestrator {
       context.previousState ?? priorVector?.cognitive,
     );
     const graphDecisionContext = await this.resolveGraphDecisionContext(context);
+    const strategyValuePriors = await this.resolveStrategyValuePriors(context.studentId);
     const strategyDecision = this.deps.strategyScheduler.decide({
       context,
       cognitiveState,
       stateVector: priorVector,
       graphDecisionContext,
+      strategyValuePriors,
     });
     const story = await this.deps.storyPlanner.plan(context, cognitiveState, strategyDecision);
     const promptBundle = this.buildSeedancePrompt(context, story, cognitiveState);
@@ -512,13 +514,21 @@ export class MobiusOrchestrator {
       ...context,
       questionText: job.promptBundle.prompt,
     });
+    const strategyValuePriors = await this.resolveStrategyValuePriors(context.studentId);
 
     return this.deps.strategyScheduler.decide({
       context,
       cognitiveState,
       stateVector: stateVector ?? undefined,
       graphDecisionContext,
+      strategyValuePriors,
     });
+  }
+
+  // 读回该学生累计的价值证据 effect_score → per-strategy 回流偏置。学生无历史时为空。
+  private async resolveStrategyValuePriors(studentId: string) {
+    const reflow = await this.deps.learningCycles.getStrategyValueReflow(studentId);
+    return reflow.biases;
   }
 
   private async resolveGraphDecisionContext(context: StudentContext): Promise<KnowledgeGraphDecisionContext | undefined> {

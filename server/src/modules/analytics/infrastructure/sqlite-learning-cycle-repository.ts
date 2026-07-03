@@ -29,6 +29,7 @@ interface LearningCycleRow {
   selected_action_json: string | null;
   outcome: LearningCycleRecord['outcome'] | null;
   effect_score: number | null;
+  effect_score_value: number | null;
   created_at: string;
   updated_at: string;
   closed_at: string | null;
@@ -83,6 +84,7 @@ export class SQLiteLearningCycleRepository {
         selected_action_json TEXT,
         outcome TEXT,
         effect_score REAL,
+        effect_score_value REAL,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         closed_at TEXT
@@ -124,6 +126,15 @@ export class SQLiteLearningCycleRepository {
       CREATE INDEX IF NOT EXISTS idx_learning_evidence_cycle_observed
       ON learning_evidence_events (cycle_id, observed_at ASC);
     `);
+
+    this.ensureColumn('learning_cycles', 'effect_score_value', 'REAL');
+  }
+
+  // 幂等迁移:老 DB 的 learning_cycles 没有 effect_score_value 列时补上。
+  private ensureColumn(table: string, column: string, type: string): void {
+    const columns = this.db.prepare(`PRAGMA table_info(${table})`).all() as unknown as Array<{ name: string }>;
+    if (columns.some((info) => info.name === column)) return;
+    this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`);
   }
 
   async create(input: Omit<LearningCycleRecord, 'id' | 'createdAt' | 'updatedAt'>): Promise<LearningCycleRecord> {
@@ -139,9 +150,9 @@ export class SQLiteLearningCycleRepository {
       INSERT INTO learning_cycles (
         id, student_id, source, status, session_id, media_job_id,
         pain_point, rule_text, knowledge_action_id, state_before_json, state_after_json,
-        hypothesis_summary_json, selected_action_json, outcome, effect_score,
+        hypothesis_summary_json, selected_action_json, outcome, effect_score, effect_score_value,
         created_at, updated_at, closed_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `).run(
       record.id,
       record.studentId,
@@ -158,6 +169,7 @@ export class SQLiteLearningCycleRepository {
       record.selectedAction ? JSON.stringify(record.selectedAction) : null,
       record.outcome ?? null,
       record.effectScore ?? null,
+      record.effectScoreValueComponent ?? null,
       record.createdAt,
       record.updatedAt,
       record.closedAt ?? null,
@@ -184,7 +196,7 @@ export class SQLiteLearningCycleRepository {
       SET status = ?, session_id = ?, media_job_id = ?, pain_point = ?, rule_text = ?,
           knowledge_action_id = ?, state_before_json = ?, state_after_json = ?,
           hypothesis_summary_json = ?, selected_action_json = ?, outcome = ?, effect_score = ?,
-          updated_at = ?, closed_at = ?
+          effect_score_value = ?, updated_at = ?, closed_at = ?
       WHERE id = ?
     `).run(
       next.status,
@@ -199,6 +211,7 @@ export class SQLiteLearningCycleRepository {
       next.selectedAction ? JSON.stringify(next.selectedAction) : null,
       next.outcome ?? null,
       next.effectScore ?? null,
+      next.effectScoreValueComponent ?? null,
       next.updatedAt,
       next.closedAt ?? null,
       id,
@@ -357,6 +370,7 @@ export class SQLiteLearningCycleRepository {
         : undefined,
       outcome: row.outcome ?? undefined,
       effectScore: row.effect_score ?? undefined,
+      effectScoreValueComponent: row.effect_score_value ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       closedAt: row.closed_at ?? undefined,

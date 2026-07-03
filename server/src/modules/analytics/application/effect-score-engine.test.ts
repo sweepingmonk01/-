@@ -1,7 +1,11 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { computeEffectScore, EFFECT_SCORE_WEIGHTS } from './effect-score-engine.js';
+import {
+  computeEffectScore,
+  EFFECT_SCORE_WEIGHTS,
+  EXECUTION_EVIDENCE_CAP,
+} from './effect-score-engine.js';
 import type { CognitiveState } from '../../mobius/domain/types.js';
 import type { LearningCycleRecord } from '../domain/types.js';
 
@@ -99,6 +103,56 @@ test('computeEffectScore: total stays clamped within [-1, 1]', () => {
     historicalCycles: [completedCycle('success'), completedCycle('success')],
   });
   assert.equal(negative.total, -1);
+});
+
+test('computeEffectScore: value-only input keeps valueComponent == total and no execution sources', () => {
+  const before = baseState({ time: 50, signalNoiseRatio: 50, emotion: 50 });
+  const after = baseState({ time: 70, signalNoiseRatio: 70, emotion: 70 });
+  const result = computeEffectScore({ outcome: 'success', stateBefore: before, stateAfter: after });
+
+  assert.equal(result.executionComponent, 0);
+  assert.equal(result.valueComponent, result.total);
+  const kinds = result.evidenceSources.map((source) => source.kind);
+  assert.deepEqual(kinds, ['value', 'value', 'value']);
+});
+
+test('computeEffectScore: evidenceSources decompose value vs execution and value drives the score', () => {
+  const before = baseState({ time: 50, signalNoiseRatio: 50, emotion: 50 });
+  const after = baseState({ time: 72, signalNoiseRatio: 72, emotion: 72 });
+  const result = computeEffectScore({
+    outcome: 'success',
+    stateBefore: before,
+    stateAfter: after,
+    executionEvidence: { interactionResolved: true, mediaGenerated: true },
+  });
+
+  const valueSources = result.evidenceSources.filter((source) => source.kind === 'value');
+  const executionSources = result.evidenceSources.filter((source) => source.kind === 'execution');
+  assert.equal(valueSources.length, 3);
+  assert.equal(executionSources.length, 2);
+
+  // 价值分量必须严格主导:执行分量绝对值不超过 CAP,且远小于价值分量。
+  assert.ok(Math.abs(result.executionComponent) <= EXECUTION_EVIDENCE_CAP + 1e-9);
+  assert.ok(result.valueComponent > Math.abs(result.executionComponent));
+  const valueSum = valueSources.reduce((sum, source) => sum + source.contribution, 0);
+  assert.ok(Math.abs(valueSum - result.valueComponent) < 1e-6);
+});
+
+test('computeEffectScore: execution proxy cannot rescue a real learning regression (anti-Goodhart)', () => {
+  const before = baseState({ time: 70, signalNoiseRatio: 70, emotion: 70 });
+  const after = baseState({ time: 45, signalNoiseRatio: 45, emotion: 45 });
+  // 学习真实退化(failure + 三因子下滑),但执行代理"全绿"。
+  const result = computeEffectScore({
+    outcome: 'failure',
+    stateBefore: before,
+    stateAfter: after,
+    executionEvidence: { interactionResolved: true, mediaGenerated: true },
+  });
+
+  // 执行代理最多贡献 +CAP,无法把负价值顶成正分。
+  assert.ok(result.executionComponent <= EXECUTION_EVIDENCE_CAP + 1e-9);
+  assert.ok(result.valueComponent < 0);
+  assert.ok(result.total < 0);
 });
 
 test('computeEffectScore: ignores incomplete history and treats as no baseline', () => {
