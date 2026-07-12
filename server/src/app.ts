@@ -17,8 +17,10 @@ import { getServerEnv } from './config/env.js';
 import { ContentOrchestrator } from './modules/content/application/content-orchestrator.js';
 import { SQLiteContentCatalog } from './modules/content/infrastructure/sqlite-content-catalog.js';
 import { ContentController } from './modules/content/presentation/content-controller.js';
-import { FirebaseTokenVerifier } from './modules/auth/application/firebase-token-verifier.js';
+import { createTokenVerifier } from './modules/auth/application/create-token-verifier.js';
+import { createSmsSender } from './modules/auth/application/create-sms-sender.js';
 import { createMobiusAuthMiddleware } from './modules/auth/presentation/mobius-auth-middleware.js';
+import { createSmsHookRouter } from './routes/authHooks.js';
 import { MobiusOrchestrator } from './modules/mobius/application/mobius-orchestrator.js';
 import { HeuristicStoryPlanner } from './modules/mobius/infrastructure/heuristic-story-planner.js';
 import { ProbabilisticCognitiveEngine } from './modules/mobius/infrastructure/probabilistic-cognitive-engine.js';
@@ -56,13 +58,11 @@ export const createMobiusApp = () => {
   const app = express();
   const env = getServerEnv();
   const authMiddleware = createMobiusAuthMiddleware({
-    verifier: new FirebaseTokenVerifier({
-      projectId: env.firebaseProjectId,
-      testSecret: env.authTestSecret,
-    }),
+    verifier: createTokenVerifier(env),
     demoStudentId: env.demoStudentId,
     allowDemoMode: env.demoModeEnabled,
   });
+  const smsSender = createSmsSender(env);
   const coachService = env.deepseekApiKey
     ? new DeepSeekCoachService({
         apiKey: env.deepseekApiKey,
@@ -228,6 +228,10 @@ export const createMobiusApp = () => {
   });
   agentJobRunner.start();
 
+  // Mounted before express.json(): the Supabase SMS hook authenticates over raw
+  // request bytes, so it must own its body parsing.
+  app.use('/api/auth/hooks', createSmsHookRouter({ hookSecret: env.supabaseSmsHookSecret, sender: smsSender }));
+
   app.use(express.json({ limit: '8mb' }));
 
   app.get('/api', (_req, res) => {
@@ -261,6 +265,8 @@ export const createMobiusApp = () => {
     },
     storageProvider: env.storageProvider,
     videoProvider: videoClient instanceof StubSeedanceClient ? 'stub' : env.videoProvider,
+    authProvider: env.authProvider,
+    smsProvider: env.smsProvider,
   }));
   app.use('/api/errors', authMiddleware, errorDiagnosisRouter);
   app.use('/api/explore', authMiddleware, createExploreSyncRouter(exploreSyncStore));
