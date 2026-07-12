@@ -50,6 +50,7 @@ export const createMobiusRouter = (
   router.post('/students/:studentId/knowledge-map/assets', asyncHandler(controller.generateKnowledgeMapAsset));
   router.post('/students/:studentId/knowledge-map/nodes/:nodeKey/video', asyncHandler(controller.createKnowledgeNodeVideo));
   router.post('/students/:studentId/foundation-science/explorations', asyncHandler(controller.recordFoundationExploration));
+  router.post('/students/:studentId/practice-interactions', asyncHandler(controller.recordPracticeInteraction));
   router.post('/ai/socratic-diagnostic/threads', asyncHandler(aiController.createSocraticThread));
   router.get('/ai/socratic-diagnostic/threads/:threadId', asyncHandler(aiController.getSocraticThread));
   router.post('/ai/socratic-diagnostic/threads/:threadId/messages', asyncHandler(aiController.replySocraticThread));

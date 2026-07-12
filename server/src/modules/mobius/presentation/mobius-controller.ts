@@ -234,6 +234,55 @@ export class MobiusController {
     res.status(201).json(result);
   };
 
+  recordPracticeInteraction = async (req: Request, res: Response) => {
+    if (!assertStudentOwnership(req, res, req.params.studentId)) return;
+    const { painPoint, rule, questionText, actionType, outcome, selfCheck, confidence, responseTimeMs, note } = req.body as {
+      painPoint?: string;
+      rule?: string;
+      questionText?: string;
+      actionType?: 'select' | 'draw' | 'drag' | 'speak' | 'sequence';
+      outcome?: InteractionOutcome;
+      selfCheck?: 'aligned' | 'partial' | 'guess';
+      confidence?: 'low' | 'medium' | 'high';
+      responseTimeMs?: number;
+      note?: string;
+    };
+
+    if (!painPoint || !rule || !actionType) {
+      res.status(400).json({ error: 'painPoint, rule, and actionType are required.' });
+      return;
+    }
+    if (outcome !== 'success' && outcome !== 'failure') {
+      res.status(400).json({ error: 'outcome must be success or failure.' });
+      return;
+    }
+
+    const result = await this.orchestrator.recordPracticeInteraction({
+      studentId: req.params.studentId,
+      painPoint,
+      rule,
+      questionText,
+      actionType,
+      outcome,
+      selfCheck,
+      confidence,
+      responseTimeMs,
+      note,
+    });
+
+    await this.eventLogger.track({
+      name: 'practice.interaction.completed',
+      payload: {
+        studentId: req.params.studentId,
+        painPoint,
+        actionType,
+        outcome,
+        cycleId: result.cycleId,
+      },
+    });
+    res.status(201).json(result);
+  };
+
   refreshMediaJob = async (req: Request, res: Response) => {
     const existingJob = await this.orchestrator.getMediaJob(req.params.jobId);
     if (!existingJob) {

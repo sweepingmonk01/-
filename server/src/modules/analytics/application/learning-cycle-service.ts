@@ -5,6 +5,7 @@ import type {
   LearningModelEvaluation,
   LearningCycleRecord,
   RecordFoundationExplorationInput,
+  RecordPracticeInteractionInput,
   RecordInteractionResolutionInput,
   StartLearningCycleInput,
   UpdateHypothesisSummaryInput,
@@ -524,6 +525,113 @@ export class LearningCycleService {
     });
 
     // 这条新完成的 cycle 是同知识点历史 cycle 的真实"后续作答表现"——回评它们的留存价值。
+    await this.reevaluateFollowupForPriorCycles(cycle.studentId, cycle.painPoint, cycle.id);
+
+    return cycle;
+  }
+
+  async recordPracticeInteraction(input: RecordPracticeInteractionInput): Promise<LearningCycleRecord> {
+    const breakdown = await this.computeEffectScoreForCycle({
+      studentId: input.studentId,
+      painPoint: input.painPoint,
+      outcome: input.outcome,
+      stateBefore: input.stateBefore,
+      stateAfter: input.stateAfter,
+    });
+    const knowledgeActionId = `practice:${input.actionType}:${input.painPoint}`;
+    const cycle = await this.repository.create({
+      studentId: input.studentId,
+      source: 'practice-interaction',
+      status: 'validated',
+      painPoint: input.painPoint,
+      rule: input.rule,
+      knowledgeActionId,
+      stateBefore: input.stateBefore,
+      stateAfter: input.stateAfter,
+      outcome: input.outcome,
+      effectScore: breakdown.total,
+      effectScoreValueComponent: breakdown.valueComponent,
+      effectScoreExecutionComponent: breakdown.executionComponent,
+      selectedAction: {
+        knowledgeAction: {
+          id: knowledgeActionId,
+          label: input.painPoint,
+          actionType: input.actionType,
+          instruction: input.rule,
+          successCriteria: ['能按一句话法则选出正确路径。'],
+          failureSignals: ['选择偏离规则，或凭猜测作答。'],
+        },
+        interactionPrompt: input.questionText ?? input.rule,
+        emotion: 'focused',
+        selectedStrategy: 'probe',
+        strategyCandidates: [],
+      },
+    });
+
+    await this.repository.appendEvent({
+      cycleId: cycle.id,
+      eventType: 'cycle.started',
+      eventPayload: { source: 'practice-interaction', painPoint: input.painPoint, actionType: input.actionType },
+    });
+    await this.repository.appendEvent({
+      cycleId: cycle.id,
+      eventType: 'state.snapshot.before',
+      eventPayload: {
+        state: toJsonObject(input.stateBefore),
+        stateVectorVersion: input.stateVectorBefore?.version,
+        stateVector: input.stateVectorBefore ? toJsonObject(input.stateVectorBefore) : undefined,
+      },
+    });
+    await this.repository.appendEvent({
+      cycleId: cycle.id,
+      eventType: 'practice.interaction.completed',
+      eventPayload: {
+        painPoint: input.painPoint,
+        actionType: input.actionType,
+        outcome: input.outcome,
+        selfCheck: input.selfCheck,
+        confidence: input.confidence,
+        responseTimeMs: input.responseTimeMs,
+        note: input.note,
+      },
+    });
+    await this.repository.appendEvent({
+      cycleId: cycle.id,
+      eventType: 'state.snapshot.after',
+      eventPayload: {
+        state: toJsonObject(input.stateAfter),
+        stateVectorVersion: input.stateVectorAfter?.version,
+        stateVector: input.stateVectorAfter ? toJsonObject(input.stateVectorAfter) : undefined,
+      },
+    });
+    await this.repository.appendEvent({
+      cycleId: cycle.id,
+      eventType: 'effect.evaluated',
+      eventPayload: { outcome: input.outcome, effectScore: cycle.effectScore, effectScoreBreakdown: breakdown },
+    });
+    await this.repository.appendEvidence({
+      studentId: cycle.studentId,
+      cycleId: cycle.id,
+      modality: 'interaction',
+      source: 'practice.interaction.outcome',
+      painPoint: cycle.painPoint,
+      rule: cycle.rule,
+      confidence: 0.7,
+      observedAt: cycle.updatedAt,
+      outcome: input.outcome,
+      modelVersion: 'probabilistic-v1',
+      privacyLevel: 'server',
+      payload: {
+        actionType: input.actionType,
+        selfCheck: input.selfCheck,
+        confidence: input.confidence,
+        responseTimeMs: input.responseTimeMs,
+        stateBefore: toJsonObject(input.stateBefore),
+        stateAfter: toJsonObject(input.stateAfter),
+        note: input.note,
+      },
+    });
+
     await this.reevaluateFollowupForPriorCycles(cycle.studentId, cycle.painPoint, cycle.id);
 
     return cycle;
