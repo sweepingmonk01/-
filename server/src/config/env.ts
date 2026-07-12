@@ -20,7 +20,20 @@ export interface ServerEnv {
   openaiApiKey?: string;
   openaiImageBaseUrl: string;
   openaiImageModel: string;
+  authProvider: 'firebase' | 'supabase';
   firebaseProjectId?: string;
+  supabaseUrl?: string;
+  supabaseJwtSecret?: string;
+  supabaseSmsHookSecret?: string;
+  smsProvider: 'stub' | 'tencent';
+  tencentSms: {
+    secretId?: string;
+    secretKey?: string;
+    smsSdkAppId?: string;
+    signName?: string;
+    templateId?: string;
+    region: string;
+  };
   demoStudentId: string;
   demoModeEnabled: boolean;
   authTestSecret?: string;
@@ -49,7 +62,20 @@ export const getServerEnv = (): ServerEnv => ({
   openaiApiKey: process.env.OPENAI_API_KEY,
   openaiImageBaseUrl: process.env.OPENAI_IMAGE_BASE_URL || 'https://api.openai.com',
   openaiImageModel: process.env.OPENAI_IMAGE_MODEL || 'gpt-image-2',
+  authProvider: process.env.MOBIUS_AUTH_PROVIDER === 'supabase' ? 'supabase' : 'firebase',
   firebaseProjectId: process.env.MOBIUS_FIREBASE_PROJECT_ID || process.env.FIREBASE_PROJECT_ID,
+  supabaseUrl: process.env.MOBIUS_SUPABASE_URL,
+  supabaseJwtSecret: process.env.MOBIUS_SUPABASE_JWT_SECRET,
+  supabaseSmsHookSecret: process.env.MOBIUS_SUPABASE_SMS_HOOK_SECRET,
+  smsProvider: process.env.MOBIUS_SMS_PROVIDER === 'tencent' ? 'tencent' : 'stub',
+  tencentSms: {
+    secretId: process.env.TENCENT_SMS_SECRET_ID,
+    secretKey: process.env.TENCENT_SMS_SECRET_KEY,
+    smsSdkAppId: process.env.TENCENT_SMS_SDK_APP_ID,
+    signName: process.env.TENCENT_SMS_SIGN_NAME,
+    templateId: process.env.TENCENT_SMS_TEMPLATE_ID,
+    region: process.env.TENCENT_SMS_REGION || 'ap-guangzhou',
+  },
   demoStudentId: process.env.MOBIUS_DEMO_STUDENT_ID || 'demo-student',
   demoModeEnabled: parseDemoModeEnabled(process.env.MOBIUS_DEMO_MODE_ENABLED),
   authTestSecret: process.env.MOBIUS_AUTH_TEST_SECRET,

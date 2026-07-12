@@ -1,16 +1,14 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
+import type { TokenVerifier, VerifiedToken } from './token-verifier.js';
 
 interface FirebaseTokenVerifierOptions {
   projectId?: string;
   testSecret?: string;
 }
 
-export interface VerifiedFirebaseToken {
-  userId: string;
-  email?: string;
-}
+export type VerifiedFirebaseToken = VerifiedToken;
 
 const FIREBASE_JWKS = createRemoteJWKSet(
   new URL('https://www.googleapis.com/service_accounts/v1/jwk/securetoken@system.gserviceaccount.com'),
@@ -32,7 +30,7 @@ const resolveProjectId = (explicitProjectId?: string): string => {
   return config.projectId.trim();
 };
 
-export class FirebaseTokenVerifier {
+export class FirebaseTokenVerifier implements TokenVerifier {
   private readonly projectId: string;
   private readonly testSecret?: Uint8Array;
 

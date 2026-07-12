@@ -11,6 +11,8 @@ interface HealthRouterOptions {
   };
   storageProvider: 'file' | 'sqlite';
   videoProvider: 'stub' | 'seedance-http';
+  authProvider: 'firebase' | 'supabase';
+  smsProvider: 'stub' | 'tencent';
 }
 
 export const healthRouter = (options: HealthRouterOptions) => {
@@ -36,6 +38,12 @@ export const healthRouter = (options: HealthRouterOptions) => {
         },
         video: {
           provider: options.videoProvider,
+        },
+        auth: {
+          provider: options.authProvider,
+        },
+        sms: {
+          provider: options.smsProvider,
         },
       },
     });

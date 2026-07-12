@@ -1,8 +1,8 @@
 import type { NextFunction, Request, Response } from 'express';
-import { FirebaseTokenVerifier } from '../application/firebase-token-verifier.js';
+import type { TokenVerifier } from '../application/token-verifier.js';
 
 interface MobiusAuthMiddlewareOptions {
-  verifier: FirebaseTokenVerifier;
+  verifier: TokenVerifier;
   demoStudentId: string;
   allowDemoMode?: boolean;
 }
