@@ -304,6 +304,55 @@ test('Mobius app enforces auth isolation and serves queued AI artifacts', { conc
       assert.deepEqual(payload.topPainPoints, ['函数图像']);
     });
 
+    await t.test('records a practice interaction into a learning cycle and updates state', async () => {
+      const response = await fetch(`${baseUrl}/api/mobius/students/student-practice/practice-interactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(await createAuthHeader('student-practice')),
+        },
+        body: JSON.stringify({
+          painPoint: '几何辅助线切入顺序',
+          rule: '遇中点，连中线。',
+          actionType: 'select',
+          outcome: 'success',
+          responseTimeMs: 8200,
+        }),
+      });
+
+      assert.equal(response.status, 201);
+      const payload = await response.json() as { cycleId: string; outcome: string; cognitiveState: unknown };
+      assert.ok(payload.cycleId);
+      assert.equal(payload.outcome, 'success');
+      assert.ok(payload.cognitiveState);
+
+      const cycles = await learningCycles.listByStudent('student-practice');
+      const practiceCycle = cycles.find((cycle) => cycle.id === payload.cycleId);
+      assert.ok(practiceCycle, 'practice cycle should be persisted');
+      assert.equal(practiceCycle.source, 'practice-interaction');
+      assert.equal(practiceCycle.outcome, 'success');
+      assert.ok(practiceCycle.stateBefore);
+      assert.ok(practiceCycle.stateAfter);
+
+      const events = await learningCycles.listEvents(practiceCycle.id);
+      assert.ok(events.some((event) => event.eventType === 'practice.interaction.completed'));
+
+      const evidence = await learningCycles.listEvidenceByCycle(practiceCycle.id);
+      assert.ok(evidence.some((item) => item.source === 'practice.interaction.outcome'));
+    });
+
+    await t.test('rejects a practice interaction with an invalid outcome', async () => {
+      const response = await fetch(`${baseUrl}/api/mobius/students/student-practice/practice-interactions`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(await createAuthHeader('student-practice')),
+        },
+        body: JSON.stringify({ painPoint: 'x', rule: 'y', actionType: 'select', outcome: 'maybe' }),
+      });
+      assert.equal(response.status, 400);
+    });
+
     await t.test('rejects invalid AI payloads before they reach service orchestration', async () => {
       const response = await fetch(`${baseUrl}/api/mobius/ai/dehydrate-homework`, {
         method: 'POST',

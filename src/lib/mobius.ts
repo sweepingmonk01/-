@@ -761,6 +761,47 @@ export const refreshMobiusMediaJob = async (
   return response.json() as Promise<MobiusMediaJobResponse>;
 };
 
+export interface PracticeInteractionRequest {
+  painPoint: string;
+  rule: string;
+  questionText?: string;
+  actionType: KnowledgeActionType;
+  outcome: 'success' | 'failure';
+  selfCheck?: 'aligned' | 'partial' | 'guess';
+  confidence?: InteractionConfidence;
+  responseTimeMs?: number;
+  note?: string;
+}
+
+export interface PracticeInteractionResponse {
+  cycleId: string;
+  studentId: string;
+  outcome: 'success' | 'failure';
+  cognitiveState: CognitiveState;
+  stateVectorVersion?: number;
+  nextActions: string[];
+}
+
+export const recordPracticeInteraction = async (
+  studentId: string,
+  payload: PracticeInteractionRequest,
+): Promise<PracticeInteractionResponse> => {
+  const response = await fetch(
+    `${MOBIUS_API_BASE_URL}/api/mobius/students/${encodeURIComponent(studentId)}/practice-interactions`,
+    {
+      method: 'POST',
+      headers: await buildMobiusHeaders({ 'Content-Type': 'application/json' }),
+      body: JSON.stringify(payload),
+    },
+  );
+
+  if (!response.ok) {
+    throw new Error(`Mobius practice interaction failed with status ${response.status}`);
+  }
+
+  return response.json() as Promise<PracticeInteractionResponse>;
+};
+
 export const resolveMobiusInteraction = async (
   jobId: string,
   payload: { outcome?: 'success' | 'failure'; actionType?: string; submission?: InteractionSubmission },

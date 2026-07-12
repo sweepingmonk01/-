@@ -281,6 +281,75 @@ export class MobiusOrchestrator {
     };
   }
 
+  async recordPracticeInteraction(input: {
+    studentId: string;
+    painPoint: string;
+    rule: string;
+    questionText?: string;
+    actionType: 'select' | 'draw' | 'drag' | 'speak' | 'sequence';
+    outcome: InteractionOutcome;
+    selfCheck?: 'aligned' | 'partial' | 'guess';
+    confidence?: 'low' | 'medium' | 'high';
+    responseTimeMs?: number;
+    note?: string;
+  }) {
+    const vectorBefore = await this.deps.stateVectors.getCurrentVector(input.studentId);
+    const latestSnapshot = await this.deps.studentStates.getLatestByStudent(input.studentId);
+    const stateBefore = vectorBefore?.cognitive ?? latestSnapshot?.cognitiveState ?? this.deps.updateEngine.defaultCognitiveState();
+    const stateAfter = this.deps.updateEngine.transitionInteractionState(stateBefore, input.outcome);
+
+    await this.deps.studentStates.create({
+      studentId: input.studentId,
+      source: 'practice-interaction',
+      interactionOutcome: input.outcome,
+      cognitiveState: stateAfter,
+      profile: {
+        grade: latestSnapshot?.profile.grade,
+        targetScore: latestSnapshot?.profile.targetScore,
+        painPoint: input.painPoint,
+        rule: input.rule,
+        knowledgeActionId: `practice:${input.actionType}:${input.painPoint}`,
+        knowledgeActionType: input.actionType,
+        diagnosedMistakeCategories: [],
+      },
+      learningSignals: {
+        attempts: 1,
+        responseTimeMs: input.responseTimeMs,
+        correctStreak: input.outcome === 'success' ? 1 : 0,
+        wrongStreak: input.outcome === 'failure' ? 1 : 0,
+      },
+    });
+    const vectorAfter = await this.deps.stateVectors.getCurrentVector(input.studentId);
+    const cycle = await this.deps.learningCycles.recordPracticeInteraction({
+      studentId: input.studentId,
+      painPoint: input.painPoint,
+      rule: input.rule,
+      questionText: input.questionText,
+      actionType: input.actionType,
+      outcome: input.outcome,
+      selfCheck: input.selfCheck,
+      confidence: input.confidence,
+      responseTimeMs: input.responseTimeMs,
+      note: input.note,
+      stateBefore,
+      stateAfter,
+      stateVectorBefore: vectorBefore,
+      stateVectorAfter: vectorAfter,
+    });
+
+    return {
+      cycleId: cycle.id,
+      studentId: input.studentId,
+      outcome: input.outcome,
+      cognitiveState: stateAfter,
+      stateVectorVersion: vectorAfter?.version,
+      nextActions: [
+        '这次作答已写入 learning cycle，状态向量已吸收结果。',
+        input.outcome === 'success' ? '规则应用成功，可进入下一题或更高难度。' : '这道题已回收到修复队列，重打一遍会更稳。',
+      ],
+    };
+  }
+
   async refreshMediaJob(jobId: string) {
     const job = await this.deps.mediaJobs.getById(jobId);
     if (!job) return null;

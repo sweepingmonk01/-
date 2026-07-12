@@ -4,7 +4,7 @@ import type { CognitiveState, CompatibleCognitiveState } from '../../../../../sh
 
 export type { CognitiveState, CompatibleCognitiveState } from '../../../../../shared/cognitive-state.js';
 
-export type StudentStateSnapshotSource = 'session-created' | 'interaction-resolved' | 'foundation-exploration';
+export type StudentStateSnapshotSource = 'session-created' | 'interaction-resolved' | 'foundation-exploration' | 'practice-interaction';
 
 export interface StudentStateSnapshot {
   id: string;

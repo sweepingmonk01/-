@@ -426,6 +426,7 @@ export default function App() {
   const errorCardRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const previousActiveVideoUrlRef = useRef<string | undefined>(undefined);
   const theaterAudioContextRef = useRef<AudioContext | null>(null);
+  const combatQuestionShownAtRef = useRef<number | null>(null);
 
   // Error Book State
   const [errorList, setErrorList] = useState<any[]>([]);
@@ -827,8 +828,27 @@ export default function App() {
     await persistTaskStatus(nextStatus);
   };
 
+  // AI Active: order the practice queue by the student's current state priority
+  // (the strategy layer's recommended pain point, then recently recurring ones),
+  // so the "next question" follows state — not fixed list order.
+  const orderErrorsByStatePriority = (errors: any[]): any[] => {
+    const recommended = studentStateSummary?.recommendedSessionDefaults?.painPoint;
+    const recent = studentStateSummary?.recentPainPoints ?? [];
+    const priorityOf = (error: any): number => {
+      const painPoint = error?.painPoint ?? '';
+      if (recommended && painPoint === recommended) return 0;
+      if (recent.includes(painPoint)) return 1;
+      return 2;
+    };
+    return errors
+      .map((error, index) => ({ error, index }))
+      .sort((a, b) => priorityOf(a.error) - priorityOf(b.error) || a.index - b.index)
+      .map((entry) => entry.error);
+  };
+
   const startContinuousPractice = async (errors: any[], startIndex: number) => {
-    const queue = errors.slice(startIndex, startIndex + 5);
+    const prioritized = orderErrorsByStatePriority(errors.slice(startIndex));
+    const queue = prioritized.slice(0, 5);
     if (!queue.length) return;
     setPracticeQueue(queue);
     setPracticeIndex(0);
@@ -1343,6 +1363,9 @@ export default function App() {
 
     setAiMode('analyzing');
     setCurrentScreen('combat');
+    combatQuestionShownAtRef.current = Date.now();
+    setCombatStateDelta(null);
+    setCombatSuggestTheater(false);
 
     const reader = new FileReader();
     reader.onloadend = async () => {
@@ -1371,6 +1394,9 @@ export default function App() {
     setAiMode('analyzing');
     setCurrentScreen('combat');
     setCombatAnswer('');
+    combatQuestionShownAtRef.current = Date.now();
+    setCombatStateDelta(null);
+    setCombatSuggestTheater(false);
 
     try {
       const { generateCloneQuestion: generateCloneQuestionViaApi } = await loadMobiusApi();
@@ -1475,8 +1501,8 @@ export default function App() {
         ),
         learningSignals: {
           attempts: 1,
-          correctStreak: 0,
-          wrongStreak: stateSummary?.interactionStats.lastOutcome === 'failure' ? 2 : 1,
+          correctStreak: stateSummary?.interactionStats.lastOutcome === 'success' ? 1 : 0,
+          wrongStreak: stateSummary?.interactionStats.lastOutcome === 'failure' ? 1 : 0,
           timeSavedMinutes: timeSaved,
         },
       });
@@ -2257,6 +2283,8 @@ export default function App() {
   );
 
   const [combatAnswer, setCombatAnswer] = useState('');
+  const [combatStateDelta, setCombatStateDelta] = useState<{ time: number; signalNoiseRatio: number; emotion: number } | null>(null);
+  const [combatSuggestTheater, setCombatSuggestTheater] = useState(false);
 
   const renderFeatureLoading = (title: string, detail: string) => (
     <div className="wind-page absolute inset-0 flex items-center justify-center px-6">
@@ -2269,6 +2297,60 @@ export default function App() {
       </div>
     </div>
   );
+
+  const handleCombatSubmit = (isCorrect: boolean, isAiContent: boolean) => {
+    // Optimistic UX: show feedback immediately, write the interaction back to state in the background.
+    setCurrentScreen('combat-feedback');
+
+    const studentId = user?.uid || (demoMode ? 'demo-student' : null);
+    if (!studentId) return;
+
+    const shownAt = combatQuestionShownAtRef.current;
+    const responseTimeMs = shownAt ? Math.max(0, Date.now() - shownAt) : undefined;
+    combatQuestionShownAtRef.current = null;
+
+    const painPoint = isAiContent && aiData ? aiData.painPoint : '几何辅助线切入顺序';
+    const rule = isAiContent && aiData ? aiData.rule : '遇中点，连中线。构造平行四边形或中位线定理。';
+    const before = normalizeCognitiveState(cogState).kernel;
+
+    void (async () => {
+      try {
+        const { recordPracticeInteraction } = await loadMobiusApi();
+        const result = await recordPracticeInteraction(studentId, {
+          painPoint,
+          rule,
+          questionText: isAiContent && aiData ? aiData.questionText : undefined,
+          actionType: 'select',
+          outcome: isCorrect ? 'success' : 'failure',
+          responseTimeMs,
+        });
+        const after = normalizeCognitiveState(result.cognitiveState).kernel;
+        setCombatStateDelta({
+          time: Math.round(after.time - before.time),
+          signalNoiseRatio: Math.round(after.signalNoiseRatio - before.signalNoiseRatio),
+          emotion: Math.round(after.emotion - before.emotion),
+        });
+        // AI Active escalation: when the state model says emotion is the bottleneck
+        // (需保护), don't push another quiz — suggest a theater intervention instead.
+        setCombatSuggestTheater(after.emotion <= after.time && after.emotion <= after.signalNoiseRatio);
+        setCogState(normalizeCognitiveState(result.cognitiveState));
+        if (user) {
+          await updateCognitiveState(user.uid, result.cognitiveState);
+        }
+        void refreshStudentStateSummary(studentId);
+      } catch (error) {
+        console.warn('Practice interaction writeback failed; state not updated.', error);
+      }
+    })();
+  };
+
+  const handleEnterTheaterFromCombat = () => {
+    const errorItem = aiMode === 'ready' && aiData
+      ? { painPoint: aiData.painPoint, rule: aiData.rule, questionText: aiData.questionText }
+      : { painPoint: '几何辅助线切入顺序', rule: '遇中点，连中线。构造平行四边形或中位线定理。' };
+    setCombatSuggestTheater(false);
+    void generateTheaterScript(errorItem);
+  };
 
   const renderCombat = (phase: 'question' | 'feedback') => {
     const isAiContent = aiMode === 'ready' && aiData;
@@ -2294,9 +2376,12 @@ export default function App() {
           practiceIndex={practiceIndex}
           isCorrect={isCorrect}
           continueLabel={continueLabel}
+          stateDelta={combatStateDelta}
+          suggestTheater={combatSuggestTheater}
+          onEnterTheater={handleEnterTheaterFromCombat}
           onAnswerChange={setCombatAnswer}
           onExit={() => setCurrentScreen('dashboard')}
-          onSubmit={() => setCurrentScreen('combat-feedback')}
+          onSubmit={() => handleCombatSubmit(isCorrect, Boolean(isAiContent))}
           onRetry={() => {
             void (async () => {
               if (isAiContent && user) {

@@ -10,7 +10,7 @@ import type {
 } from '../../mobius/domain/types.js';
 import type { ExecutionEvidence } from '../application/effect-score-engine.js';
 
-export type LearningCycleSource = 'mobius-session' | 'foundation-science-exploration';
+export type LearningCycleSource = 'mobius-session' | 'foundation-science-exploration' | 'practice-interaction';
 export type LearningCycleStatus = 'started' | 'validated' | 'diagnosed' | 'closed';
 export type LearningEvidenceModality = 'text' | 'image' | 'interaction' | 'graph' | 'diagnosis' | 'transfer';
 export type LearningEvidencePrivacyLevel = 'local' | 'server' | 'redacted';
@@ -85,6 +85,7 @@ export type LearningCycleEventType =
   | 'state.snapshot.before'
   | 'action.selected'
   | 'foundation.exploration.completed'
+  | 'practice.interaction.completed'
   | 'interaction.resolved'
   | 'state.snapshot.after'
   | 'effect.evaluated'
@@ -149,6 +150,23 @@ export interface RecordFoundationExplorationInput {
   taskLabel: string;
   actionType: KnowledgeAction['actionType'];
   outcome: InteractionOutcome;
+  stateBefore: CognitiveState;
+  stateAfter: CognitiveState;
+  stateVectorBefore?: StudentStateVector | null;
+  stateVectorAfter?: StudentStateVector | null;
+  note?: string;
+}
+
+export interface RecordPracticeInteractionInput {
+  studentId: string;
+  painPoint: string;
+  rule: string;
+  questionText?: string;
+  actionType: KnowledgeAction['actionType'];
+  outcome: InteractionOutcome;
+  selfCheck?: 'aligned' | 'partial' | 'guess';
+  confidence?: 'low' | 'medium' | 'high';
+  responseTimeMs?: number;
   stateBefore: CognitiveState;
   stateAfter: CognitiveState;
   stateVectorBefore?: StudentStateVector | null;

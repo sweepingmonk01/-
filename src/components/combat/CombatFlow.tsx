@@ -20,6 +20,9 @@ interface CombatFlowProps {
   practiceIndex: number;
   isCorrect: boolean;
   continueLabel: string;
+  stateDelta?: { time: number; signalNoiseRatio: number; emotion: number } | null;
+  suggestTheater?: boolean;
+  onEnterTheater?: () => void;
   onAnswerChange: (value: string) => void;
   onExit: () => void;
   onSubmit: () => void;
@@ -43,6 +46,9 @@ export default function CombatFlow({
   practiceIndex,
   isCorrect,
   continueLabel,
+  stateDelta,
+  suggestTheater,
+  onEnterTheater,
   onAnswerChange,
   onExit,
   onSubmit,
@@ -52,6 +58,47 @@ export default function CombatFlow({
   const isAiContent = aiMode === 'ready' && aiData;
   const activePainPoint = isAiContent ? aiData.painPoint : '几何辅助线切入顺序';
   const sourceLabel = isAiContent ? 'AI 生成变式' : '内置示例题';
+
+  const renderTheaterSuggestion = (tone: 'light' | 'dark') => {
+    if (!suggestTheater || !onEnterTheater) return null;
+    const wrap = tone === 'dark'
+      ? 'border-white/16 bg-white/10 text-white'
+      : 'border-[#1a1a2e]/12 bg-[#1a1a2e]/5 text-[#1a1a2e]';
+    return (
+      <button
+        onClick={onEnterTheater}
+        className={`mb-4 w-full rounded-[20px] border ${wrap} px-4 py-3 text-left`}
+      >
+        <p className="text-xs font-bold uppercase tracking-wider opacity-70">状态提示 · 情绪需保护</p>
+        <p className="mt-1 text-sm font-black">先进一次剧场演练，稳住状态再刷题 →</p>
+      </button>
+    );
+  };
+
+  const renderStateDelta = (tone: 'light' | 'dark') => {
+    if (!stateDelta) return null;
+    const axes: Array<{ key: keyof typeof stateDelta; label: string }> = [
+      { key: 'time', label: '时间' },
+      { key: 'signalNoiseRatio', label: '信噪比' },
+      { key: 'emotion', label: '情绪' },
+    ];
+    const fmt = (n: number) => (n > 0 ? `+${n}` : `${n}`);
+    const color = (n: number) => (n > 0 ? 'text-[var(--color-accent-green)]' : n < 0 ? 'text-pink-400' : 'opacity-60');
+    const wrap = tone === 'dark' ? 'border-white/14 bg-white/8 text-white' : 'border-[#1a1a2e]/12 bg-white/40 text-[#1a1a2e]';
+    return (
+      <div className={`mb-6 rounded-[20px] border ${wrap} px-4 py-3`}>
+        <p className="mb-2 text-xs font-bold uppercase tracking-wider opacity-70">这次作答后，你的状态动了</p>
+        <div className="flex justify-between gap-2">
+          {axes.map(({ key, label }) => (
+            <div key={key} className="flex flex-1 flex-col items-center">
+              <span className="text-xs opacity-70">{label}</span>
+              <span className={`text-lg font-black ${color(stateDelta[key])}`}>{fmt(stateDelta[key])}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  };
 
   if (phase === 'feedback') {
     if (!isCorrect) {
@@ -100,6 +147,9 @@ export default function CombatFlow({
               <p className="mt-4 text-xs text-slate-400">这道题已经回收到你的修复队列，重打一遍就会更稳。</p>
             </motion.div>
 
+            {renderStateDelta('dark')}
+            {renderTheaterSuggestion('dark')}
+
             <div className="mt-auto mb-8">
               <button
                 onClick={onRetry}
@@ -140,10 +190,12 @@ export default function CombatFlow({
           {isAiContent ? '完美应用法则成功破茧，你已完全掌握这道题的核心陷阱！' : '识别到了中点，选择“倍长中线”造全等，思路非常完美。这 4 分你拿稳了！'}
         </p>
 
-        <div className="flex gap-4 w-full max-w-sm relative z-10 mt-8">
+        <div className="w-full max-w-sm relative z-10 mt-8">
+          {renderStateDelta('light')}
+          {renderTheaterSuggestion('light')}
           <button
             onClick={onContinue}
-            className="game-btn flex-1 bg-white py-4 text-lg text-[#1a1a2e]"
+            className="game-btn w-full bg-white py-4 text-lg text-[#1a1a2e]"
           >
             {continueLabel}
           </button>
