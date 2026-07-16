@@ -26,10 +26,10 @@ npm run smoke:local        # 交 QA 前:统一服务器就绪 + 前端壳 + auth
 
 ## 4. ShenGong Skill 母仓(审查/推理协议)
 
-- 来源:`~/Desktop/ShenGong-Skills/skills/`(母仓/单一真相源),已用户级软链安装。
+- 来源:`~/Desktop/ShenGong/skills/`(母仓/单一真相源),已用户级软链安装。
 - 本项目常用:
   - `shengong-info-topology-control`:结构拓扑审查、伪复杂判定、增熵/降熵、最小修复。本项目真实审查样例见母仓 `cases/2026-07-03-liezi-yufeng-ai-active-learning-audit.md`(结论 PASS_WITH_WARNINGS;§10 含模型优化清单 T1-T6)。
   - `shengong-product-strategy-operator`:客户倒推、学习切片、证据门。
 - 边界:审查/推理协议**不是自动裁决器**,不替代作者确认、实验验证、**真实学习效果数据**、发布门禁。`I*` 只作透镜;无证据一律 `not_evaluated`。
 - 模型优化下一步(母仓样例 §10,按 ROI):T1 剧情规划器概率化 · T2 effect_score 飞轮价值信号闭合(防 Goodhart)· T3 影子 A/B 晋升门 · T4 概率引擎覆盖率校准 · T5 假设引擎跨周期累积 · T6 图谱语义+双引擎错题桥接。
-- 母仓一致性验证:在 `~/Desktop/ShenGong-Skills` 运行 `python3 scripts/validate_skills.py`。
+- 母仓一致性验证:在 `~/Desktop/ShenGong` 运行 `python3 scripts/validate_skills.py`。
