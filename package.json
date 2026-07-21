@@ -19,7 +19,10 @@
     "typecheck:server": "tsc -p tsconfig.server.json --noEmit",
     "test:server": "node --import tsx --test \"server/**/*.test.ts\"",
     "migrate:sqlite": "tsx server/scripts/migrate-file-storage-to-sqlite.ts",
-    "replay:cycles": "tsx server/scripts/replay-cycles.ts"
+    "replay:cycles": "tsx server/scripts/replay-cycles.ts",
+    "site:dev": "npm --prefix site run dev",
+    "site:build": "npm --prefix site run build",
+    "site:preview": "npm --prefix site run preview"
   },
   "dependencies": {
     "@capacitor/core": "^8.3.1",
